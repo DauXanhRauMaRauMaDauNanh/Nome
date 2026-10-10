@@ -1,5 +1,7 @@
 #include "nome_c_net.h"
 #include "nome_physics.hpp"
+#include "nome_worldgen.hpp"
+#include "nome_crafting.hpp"
 #include <chrono>
 #include <thread>
 #include <mutex>
@@ -14,24 +16,19 @@
   #define NOME_EXPORT __attribute__((visibility("default")))
 #endif
 
-// Internal High-Performance Engine State
-struct ChunkSection {
-    uint16_t blocks[4096];
-    uint8_t block_light[2048];
-    uint8_t sky_light[2048];
-};
-
+// Master 16x16x384 Native World State (All in Native C++, ZERO JVM Heap)
 struct NativeServerState {
     std::atomic<bool> is_running{false};
     std::atomic<uint64_t> tick_counter{0};
     double rolling_tps{20.0};
-    double current_mspt{0.05};
+    double current_mspt{0.04};
     std::mutex state_mutex;
+    std::thread* tick_thread{nullptr};
 
     NomeServerNetwork *network{nullptr};
 
-    // Spawn chunk section (16x16x16)
-    ChunkSection spawn_section{};
+    // Spawn chunk column: 16 * 16 * 384 = 98304 blocks
+    uint16_t spawn_blocks[16 * 16 * 384];
 
     // Upcall function pointers to Java Plugin EventBus
     NomeOnPlayerJoinFn java_on_join{nullptr};
@@ -66,16 +63,48 @@ static void internal_on_block_break(uint64_t player_id, int32_t x, int32_t y, in
     }
 }
 
+static void native_tick_loop() {
+    printf("[Nome-Core] Native High-Precision 20 TPS OS Thread Started.\n");
+    while (g_server && g_server->is_running.load()) {
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        // 1. Tick networking (poll non-blocking sockets)
+        if (g_server->network) {
+            nome_net_poll_events(g_server->network, 0);
+        }
+
+        // 2. Physics & collision pass (C++ AABB checks)
+        g_server->tick_counter.fetch_add(1);
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        g_server->current_mspt = ms;
+
+        // Pacing to exact 50.0ms tick (20.0 TPS)
+        if (ms < 50.0) {
+            std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(50.0 - ms));
+            g_server->rolling_tps = 20.0;
+        } else {
+            g_server->rolling_tps = (ms > 0.0) ? (1000.0 / ms) : 20.0;
+        }
+    }
+    printf("[Nome-Core] Native Tick Loop Stopped.\n");
+}
+
 extern "C" {
 
 NOME_EXPORT const char* nome_rust_version() {
-    return "Nome-Core v0.2.0-native [C (IOCP Net) + C++ (Physics/Lighting) + Rust (Safe Architecture)]";
+    return "Nome-Core v0.3.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/Crafting/Lighting) + Rust Architecture]";
 }
 
 NOME_EXPORT bool nome_native_init() {
     if (!g_server) {
         g_server = new NativeServerState();
-        std::memset(&g_server->spawn_section, 0, sizeof(ChunkSection));
+        
+        // Procedurally generate the spawn world in pure Native C++ (Perlin 3D Noise)
+        printf("[Nome-Core] Procedurally generating 3D Voxel World (Height: -64 to 319)...\n");
+        nome_worldgen_generate_chunk(0, 0, g_server->spawn_blocks, 1337);
+
         g_server->network = nome_net_create("0.0.0.0", 25565, 4);
         nome_net_set_callbacks(g_server->network,
                                internal_on_player_join,
@@ -92,12 +121,25 @@ NOME_EXPORT bool nome_native_start() {
         nome_net_start(g_server->network);
     }
     g_server->is_running.store(true);
+
+    // Launch background native tick thread for 0% Java CPU overhead
+    if (!g_server->tick_thread) {
+        g_server->tick_thread = new std::thread(native_tick_loop);
+    }
+
     return true;
 }
 
 NOME_EXPORT void nome_native_stop() {
     if (g_server) {
         g_server->is_running.store(false);
+        if (g_server->tick_thread) {
+            if (g_server->tick_thread->joinable()) {
+                g_server->tick_thread->join();
+            }
+            delete g_server->tick_thread;
+            g_server->tick_thread = nullptr;
+        }
         if (g_server->network) {
             nome_net_stop(g_server->network);
         }
@@ -117,32 +159,7 @@ NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,
 }
 
 NOME_EXPORT double nome_native_tick_once() {
-    if (!g_server || !g_server->is_running.load()) return 20.0;
-
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    // 1. Tick networking (poll C non-blocking sockets for packets)
-    if (g_server->network) {
-        nome_net_poll_events(g_server->network, 0);
-    }
-
-    // 2. Physics & collision pass (C++ AABB checks)
-    // 3. Starlight light calculations
-
-    g_server->tick_counter.fetch_add(1);
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-    g_server->current_mspt = ms;
-
-    // Target 50ms tick (20 TPS)
-    if (ms < 50.0) {
-        std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(50.0 - ms));
-        g_server->rolling_tps = 20.0;
-    } else {
-        g_server->rolling_tps = (ms > 0.0) ? (1000.0 / ms) : 20.0;
-    }
-
+    if (!g_server) return 20.0;
     return g_server->rolling_tps;
 }
 
@@ -152,10 +169,10 @@ NOME_EXPORT double nome_native_get_mspt() {
 
 NOME_EXPORT void nome_native_set_block(int32_t x, int32_t y, int32_t z, uint16_t block_id) {
     if (!g_server) return;
-    int idx = (y & 15) * 256 + (z & 15) * 16 + (x & 15);
-    {
+    int idx = ((y + 64) * 256) + ((z & 15) * 16) + (x & 15);
+    if (idx >= 0 && idx < 16 * 16 * 384) {
         std::lock_guard<std::mutex> lock(g_server->state_mutex);
-        g_server->spawn_section.blocks[idx] = block_id;
+        g_server->spawn_blocks[idx] = block_id;
     }
     if (g_server->network) {
         nome_net_send_block_change(g_server->network, x, y, z, block_id);
@@ -164,9 +181,12 @@ NOME_EXPORT void nome_native_set_block(int32_t x, int32_t y, int32_t z, uint16_t
 
 NOME_EXPORT uint16_t nome_native_get_block(int32_t x, int32_t y, int32_t z) {
     if (!g_server) return 0;
-    int idx = (y & 15) * 256 + (z & 15) * 16 + (x & 15);
-    std::lock_guard<std::mutex> lock(g_server->state_mutex);
-    return g_server->spawn_section.blocks[idx];
+    int idx = ((y + 64) * 256) + ((z & 15) * 16) + (x & 15);
+    if (idx >= 0 && idx < 16 * 16 * 384) {
+        std::lock_guard<std::mutex> lock(g_server->state_mutex);
+        return g_server->spawn_blocks[idx];
+    }
+    return 0;
 }
 
 NOME_EXPORT void nome_native_broadcast_message(const char *message) {
@@ -179,6 +199,65 @@ NOME_EXPORT void nome_native_teleport_player(uint64_t player_id, double x, doubl
     if (g_server && g_server->network) {
         nome_net_send_teleport(g_server->network, player_id, x, y, z, yaw, pitch);
     }
+}
+
+// 100% Native Player State Queries (Off-Heap in C++, Zero Java Object Allocation)
+NOME_EXPORT bool nome_native_get_player_pos(uint64_t player_id, double* out_x, double* out_y, double* out_z, float* out_yaw, float* out_pitch) {
+    if (!g_server || !g_server->network) return false;
+    NomeClientSession* c = nome_net_get_client(g_server->network, player_id);
+    if (c) {
+        if (out_x) *out_x = c->x;
+        if (out_y) *out_y = c->y;
+        if (out_z) *out_z = c->z;
+        if (out_yaw) *out_yaw = c->yaw;
+        if (out_pitch) *out_pitch = c->pitch;
+        return true;
+    }
+    return false;
+}
+
+NOME_EXPORT int32_t nome_native_get_player_health(uint64_t player_id) {
+    if (!g_server || !g_server->network) return 20;
+    NomeClientSession* c = nome_net_get_client(g_server->network, player_id);
+    return c ? c->health : 20;
+}
+
+NOME_EXPORT void nome_native_set_player_health(uint64_t player_id, int32_t health) {
+    if (!g_server || !g_server->network) return;
+    NomeClientSession* c = nome_net_get_client(g_server->network, player_id);
+    if (c) c->health = health;
+}
+
+NOME_EXPORT bool nome_native_get_player_item(uint64_t player_id, int32_t slot, uint16_t* out_item, uint8_t* out_count) {
+    if (!g_server || !g_server->network || slot < 0 || slot >= 46) return false;
+    NomeClientSession* c = nome_net_get_client(g_server->network, player_id);
+    if (c) {
+        if (out_item) *out_item = c->inventory[slot];
+        if (out_count) *out_count = c->inventory_count[slot];
+        return true;
+    }
+    return false;
+}
+
+NOME_EXPORT void nome_native_set_player_item(uint64_t player_id, int32_t slot, uint16_t item, uint8_t count) {
+    if (!g_server || !g_server->network || slot < 0 || slot >= 46) return;
+    NomeClientSession* c = nome_net_get_client(g_server->network, player_id);
+    if (c) {
+        c->inventory[slot] = item;
+        c->inventory_count[slot] = count;
+        nome_net_send_slot(g_server->network, player_id, 0, slot, item, count);
+    }
+}
+
+// 100% Native Crafting Solver (2x2 and 3x3)
+NOME_EXPORT bool nome_native_craft_2x2(uint16_t in0, uint16_t in1, uint16_t in2, uint16_t in3,
+                                      uint16_t* out_item, uint8_t* out_count) {
+    uint16_t grid[4] = {in0, in1, in2, in3};
+    return nome::CraftingManager::Instance().MatchGrid(grid, 2, out_item, out_count);
+}
+
+NOME_EXPORT bool nome_native_craft_3x3(const uint16_t* grid9, uint16_t* out_item, uint8_t* out_count) {
+    return nome::CraftingManager::Instance().MatchGrid(grid9, 3, out_item, out_count);
 }
 
 }

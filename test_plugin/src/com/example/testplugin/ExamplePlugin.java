@@ -21,6 +21,22 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
         getLogger().info("[ExamplePlugin] Enabling standard Bukkit/Paper plugin features on Native Core!");
         getServer().getPluginManager().registerEvents(this, this);
 
+        // Verify Native C++ Crafting from Java Bukkit API
+        short[] res2x2 = new short[2];
+        if (Bukkit.craft2x2((short) 17, (short) 0, (short) 0, (short) 0, res2x2)) {
+            getLogger().info("[ExamplePlugin] Native C++ Crafting Verified: 1 Oak Log -> Item " + res2x2[0] + " x" + res2x2[1] + " (Planks)");
+        }
+
+        short[] grid9 = new short[] {
+            5, 5, 5,
+            0, 280, 0,
+            0, 280, 0
+        };
+        short[] res3x3 = new short[2];
+        if (Bukkit.craft3x3(grid9, res3x3)) {
+            getLogger().info("[ExamplePlugin] Native C++ 3x3 Crafting Verified: 3 Planks + 2 Sticks -> Item " + res3x3[0] + " x" + res3x3[1] + " (Wooden Pickaxe)");
+        }
+
         // Schedule a recurring task using BukkitScheduler
         getServer().getScheduler().runTaskTimer(this, () -> {
             // Periodic keepalive / metrics

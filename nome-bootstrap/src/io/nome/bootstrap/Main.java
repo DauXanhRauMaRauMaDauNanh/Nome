@@ -56,11 +56,10 @@ public class Main {
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "Nome-Shutdown-Hook"));
         server.start();
 
-        // 7. Tick Loop (20 TPS)
+        // 7. Engine is ticked by high-precision native OS thread in C++ (0% Java CPU overhead)
         try {
             while (true) {
-                server.tick();
-                Thread.sleep(10);
+                Thread.sleep(1000);
             }
         } catch (InterruptedException e) {
             server.stop();

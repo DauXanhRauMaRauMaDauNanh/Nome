@@ -14,8 +14,6 @@ public class Player implements Entity, CommandSender {
     private final UUID uuid;
     private World world;
     private Location location;
-    private double health = 20.0;
-    private int foodLevel = 20;
     private int ping = 0;
     private boolean isOp = false;
     private final Server server;
@@ -34,7 +32,7 @@ public class Player implements Entity, CommandSender {
     @Override public String getName() { return name; }
     @Override public World getWorld() { return world; }
     @Override public Location getLocation() { return location.clone(); }
-    @Override public boolean isDead() { return health <= 0; }
+    @Override public boolean isDead() { return getHealth() <= 0; }
     @Override public void remove() {}
     @Override public EntityType getType() { return EntityType.PLAYER; }
     @Override public Server getServer() { return server; }
@@ -62,14 +60,24 @@ public class Player implements Entity, CommandSender {
         System.out.println("[Nome-Server] Teleported player " + name + " to " + loc);
     }
 
-    public double getHealth() { return health; }
-    public void setHealth(double health) { this.health = health; }
+    // Direct Off-Heap Native Access (Zero GC Allocations)
+    public double getHealth() { 
+        return (double) NomeNativeBridge.getPlayerHealth((long) entityId); 
+    }
 
-    public int getFoodLevel() { return foodLevel; }
-    public void setFoodLevel(int food) { this.foodLevel = food; }
+    public void setHealth(double health) { 
+        NomeNativeBridge.setPlayerHealth((long) entityId, (int) health); 
+    }
+
+    public int getFoodLevel() { return 20; }
+    public void setFoodLevel(int food) {}
 
     public int getPing() { return ping; }
     public void setPing(int ping) { this.ping = ping; }
+
+    public void setItem(int slot, short itemId, byte count) {
+        NomeNativeBridge.setPlayerItem((long) entityId, slot, itemId, count);
+    }
 
     public void kickPlayer(String message) {
         System.out.println("[Nome-Server] Kicked player " + name + ": " + message);

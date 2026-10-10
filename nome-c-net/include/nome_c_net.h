@@ -45,7 +45,7 @@ NOME_API bool nome_buffer_write_varint(NomePacketBuffer *buf, int32_t val);
 NOME_API bool nome_buffer_write_string(NomePacketBuffer *buf, const char *str);
 
 /* =========================================================================
-   3. Minecraft Protocol States & Client Session
+   3. Minecraft Protocol States & Client Session (Off-Heap State)
    ========================================================================= */
 
 typedef enum NomeConnState {
@@ -64,6 +64,12 @@ typedef struct NomeClientSession {
     uint64_t uuid_least;
     double x, y, z;
     float yaw, pitch;
+    int health;
+    int food;
+    int gamemode;
+    uint16_t inventory[46];
+    uint8_t inventory_count[46];
+    uint64_t last_keepalive_sent;
     uint8_t rx_buf[8192];
     size_t rx_len;
     bool is_active;
@@ -98,6 +104,9 @@ NOME_API void nome_net_set_callbacks(NomeServerNetwork *net,
 NOME_API void nome_net_broadcast_chat(NomeServerNetwork *net, const char *message);
 NOME_API void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x, double y, double z, float yaw, float pitch);
 NOME_API void nome_net_send_block_change(NomeServerNetwork *net, int32_t x, int32_t y, int32_t z, uint16_t block_id);
+NOME_API void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, int window_id, int slot, uint16_t item_id, uint8_t count);
+
+NOME_API NomeClientSession* nome_net_get_client(NomeServerNetwork *net, uint64_t player_id);
 
 #ifdef __cplusplus
 }

@@ -8,6 +8,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.scheduler.BukkitScheduler;
+import io.nome.bridge.NomeNativeBridge;
 
 public final class Bukkit {
     private static Server server;
@@ -46,4 +47,13 @@ public final class Bukkit {
     public static void shutdown() { server.shutdown(); }
     public static double[] getTPS() { return server.getTPS(); }
     public static double getMSPT() { return server.getMSPT(); }
+
+    // 100% Native C++ Crafting Engine Access for Java Plugins
+    public static boolean craft2x2(short in0, short in1, short in2, short in3, short[] outResult) {
+        return NomeNativeBridge.craft2x2(in0, in1, in2, in3, outResult);
+    }
+
+    public static boolean craft3x3(short[] grid9, short[] outResult) {
+        return NomeNativeBridge.craft3x3(grid9, outResult);
+    }
 }
