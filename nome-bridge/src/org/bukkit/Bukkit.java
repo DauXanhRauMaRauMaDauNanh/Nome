@@ -69,4 +69,9 @@ public final class Bukkit {
     public static boolean craft3x3(short[] grid9, short[] outResult) {
         return NomeNativeBridge.craft3x3(grid9, outResult);
     }
+
+    public static org.bukkit.plugin.messaging.Messenger getMessenger() { return server.getMessenger(); }
+    public static UnsafeValues getUnsafe() { return server.getUnsafe(); }
+    public static boolean isStopping() { return server.isStopping(); }
+    public static java.io.File getWorldContainer() { return server.getWorldContainer(); }
 }

@@ -49,4 +49,9 @@ public interface Server {
     org.bukkit.command.CommandMap getCommandMap();
     org.bukkit.command.PluginCommand getPluginCommand(String name);
     ConsoleCommandSender getConsoleSender();
+
+    org.bukkit.plugin.messaging.Messenger getMessenger();
+    UnsafeValues getUnsafe();
+    boolean isStopping();
+    File getWorldContainer();
 }

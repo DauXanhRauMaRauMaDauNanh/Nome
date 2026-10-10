@@ -54,7 +54,12 @@ public abstract class JavaPlugin implements Plugin, TabExecutor {
     @Override public Server getServer() { return server; }
 
     public PluginCommand getCommand(String name) {
-        return getServer().getPluginCommand(name);
+        PluginCommand cmd = getServer().getPluginCommand(name);
+        if (cmd == null) {
+            cmd = new PluginCommand(name, this);
+            getServer().getCommandMap().register(getName(), cmd);
+        }
+        return cmd;
     }
 
     private File configFile;

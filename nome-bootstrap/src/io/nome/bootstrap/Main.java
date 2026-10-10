@@ -85,9 +85,22 @@ public class Main {
                         NomeNativeBridge.saveAllChunks();
                         MinecraftConsole.info("Saved the game");
                     } else if (line.equalsIgnoreCase("help") || line.equalsIgnoreCase("?")) {
-                        MinecraftConsole.info("Nome Server Commands: stop, save-all, help, tps, reload");
+                        MinecraftConsole.info("Nome Server Commands: stop, save-all, help, tps, plugins, say, version, reload");
                     } else if (line.equalsIgnoreCase("tps")) {
                         MinecraftConsole.info("TPS from last 1m, 5m, 15m: 20.0, 20.0, 20.0 (Native Core)");
+                    } else if (line.equalsIgnoreCase("plugins") || line.equalsIgnoreCase("pl")) {
+                        org.bukkit.plugin.Plugin[] plist = server.getPluginManager().getPlugins();
+                        StringBuilder sb = new StringBuilder("Plugins (" + plist.length + "): ");
+                        for (int i = 0; i < plist.length; i++) {
+                            if (i > 0) sb.append(", ");
+                            sb.append(plist[i].isEnabled() ? "\u001B[32m" : "\u001B[31m").append(plist[i].getName()).append("\u001B[0m");
+                        }
+                        MinecraftConsole.info(sb.toString());
+                    } else if (line.toLowerCase().startsWith("say ")) {
+                        String msg = line.substring(4).trim();
+                        server.broadcastMessage("[Server] " + msg);
+                    } else if (line.equalsIgnoreCase("version") || line.equalsIgnoreCase("ver")) {
+                        MinecraftConsole.info("This server is running Nome version 26.3-NATIVE (Protocol 777 & 765) (Implementing 100% Native C/C++ Engine & Bukkit/Paper API)");
                     } else {
                         boolean handled = server.getCommandMap().dispatch(server.getConsoleSender(), line);
                         if (!handled) {

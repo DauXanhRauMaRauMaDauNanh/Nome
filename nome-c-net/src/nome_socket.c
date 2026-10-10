@@ -1,4 +1,5 @@
 #include "../include/nome_c_net.h"
+#include "../include/nome_config_26_3.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -506,9 +507,13 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 // ServerboundLoginAcknowledgedPacket (0x03) -> Switch to CONFIGURATION state
                 c->state = NOME_STATE_CONFIGURATION;
 
-                // Send ClientboundFinishConfigurationPacket (0x03 for 26.3, 0x02 for 1.20.4)
-                int finish_id = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0) ? 0x03 : 0x02;
-                send_raw_packet(c->socket_fd, finish_id, NULL, 0);
+                if (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0) {
+                    // Send complete 26.3 configuration packet stream (SelectKnownPacks, RegistryData, UpdateTags, FinishConfiguration)
+                    send(c->socket_fd, (const char*)NOME_CONFIG_26_3_DATA, (int)NOME_CONFIG_26_3_DATA_LEN, 0);
+                } else {
+                    // Send ClientboundFinishConfigurationPacket (0x02 for 1.20.4)
+                    send_raw_packet(c->socket_fd, 0x02, NULL, 0);
+                }
             }
         } else if (c->state == NOME_STATE_CONFIGURATION) {
             // Configuration State handling
@@ -521,8 +526,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 }
                 send_full_play_sequence(net, c);
             } else if (packet_id == 0x00 || packet_id == 0x07) {
-                // Client Information (0x00) or Select Known Packs (0x07) -> Send Finish Configuration
-                send_raw_packet(c->socket_fd, finish_id, NULL, 0);
+                // Client Information (0x00) or Select Known Packs (0x07)
+                // Packets already streamed in full; no extra action required
             }
         } else if (c->state == NOME_STATE_PLAY) {
             // Universal Packet Interception Hook for Anticheat & ProtocolLib

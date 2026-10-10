@@ -47,6 +47,9 @@ public class NomeServer implements Server {
     private volatile Thread serverThread = null;
     private volatile double currentTPS = 20.0;
     private volatile double currentMSPT = 0.05;
+    private final org.bukkit.plugin.messaging.Messenger messenger = new org.bukkit.plugin.messaging.StandardMessenger();
+    private final org.bukkit.UnsafeValues unsafe = new NomeUnsafeValues();
+    private volatile boolean isStopping = false;
 
     public NomeServer() {
         instance = this;
@@ -158,6 +161,7 @@ public class NomeServer implements Server {
 
     @Override
     public void shutdown() {
+        isStopping = true;
         MinecraftConsole.info("Stopping server");
         MinecraftConsole.info("Saving players");
         MinecraftConsole.info("Saving worlds");
@@ -294,5 +298,25 @@ public class NomeServer implements Server {
     @Override
     public org.bukkit.command.ConsoleCommandSender getConsoleSender() {
         return consoleSender;
+    }
+
+    @Override
+    public org.bukkit.plugin.messaging.Messenger getMessenger() {
+        return messenger;
+    }
+
+    @Override
+    public org.bukkit.UnsafeValues getUnsafe() {
+        return unsafe;
+    }
+
+    @Override
+    public boolean isStopping() {
+        return isStopping;
+    }
+
+    @Override
+    public File getWorldContainer() {
+        return new File(".");
     }
 }

@@ -264,7 +264,7 @@ public final class NomeNativeBridge {
             if (server != null) {
                 World w = server.getWorlds().isEmpty() ? null : server.getWorlds().get(0);
                 UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
-                Player p = new Player((int) playerId, username, uuid, w, new Location(w, 0.5, 64.0, 0.5), server);
+                Player p = new io.nome.bridge.entity.CraftPlayer((int) playerId, username, uuid, w, new Location(w, 0.5, 64.0, 0.5), server);
                 server.registerPlayer(p);
 
                 MinecraftConsole.info("UUID of player " + username + " is " + uuid);

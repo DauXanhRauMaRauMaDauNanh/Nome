@@ -82,21 +82,23 @@ public class YamlConfiguration extends FileConfiguration {
         class StackEntry {
             final int indent;
             final ConfigurationSection section;
-            String currentListKey = null;
+            final String key;
             List<Object> currentList = null;
 
-            StackEntry(int indent, ConfigurationSection section) {
+            StackEntry(int indent, ConfigurationSection section, String key) {
                 this.indent = indent;
                 this.section = section;
+                this.key = key;
             }
         }
 
         Deque<StackEntry> stack = new ArrayDeque<>();
-        stack.push(new StackEntry(-1, this));
+        stack.push(new StackEntry(-1, this, null));
 
         String[] lines = contents.split("\r?\n");
-        for (String line : lines) {
-            if (line.trim().isEmpty() || line.trim().startsWith("#")) {
+        for (String rawLine : lines) {
+            String line = stripComment(rawLine);
+            if (line.trim().isEmpty()) {
                 continue;
             }
 
@@ -113,15 +115,22 @@ public class YamlConfiguration extends FileConfiguration {
 
             if (trimmed.startsWith("- ")) {
                 String itemStr = trimmed.substring(2).trim();
-                if (current.currentListKey != null && current.currentList != null) {
-                    current.currentList.add(parseScalar(itemStr));
+                if (current.currentList == null) {
+                    current.currentList = new ArrayList<>();
+                    if (stack.size() > 1) {
+                        Iterator<StackEntry> it = stack.iterator();
+                        it.next(); // current
+                        if (it.hasNext()) {
+                            StackEntry parent = it.next();
+                            if (parent != null && current.key != null) {
+                                parent.section.set(current.key, current.currentList);
+                            }
+                        }
+                    }
                 }
+                current.currentList.add(parseScalar(itemStr));
                 continue;
             }
-
-            // Not a list item anymore for the current section
-            current.currentListKey = null;
-            current.currentList = null;
 
             int colon = trimmed.indexOf(':');
             if (colon != -1) {
@@ -134,14 +143,8 @@ public class YamlConfiguration extends FileConfiguration {
 
                 String valStr = trimmed.substring(colon + 1).trim();
                 if (valStr.isEmpty()) {
-                    // Check if next lines could be list or nested section
                     ConfigurationSection newSec = current.section.createSection(key);
-                    StackEntry nextEntry = new StackEntry(indent, newSec);
-                    // Also prepare list in case next line is '- '
-                    List<Object> list = new ArrayList<>();
-                    nextEntry.currentListKey = key;
-                    nextEntry.currentList = list;
-                    current.section.set(key, list);
+                    StackEntry nextEntry = new StackEntry(indent, newSec, key);
                     stack.push(nextEntry);
                 } else {
                     current.section.set(key, parseScalar(valStr));
@@ -150,8 +153,40 @@ public class YamlConfiguration extends FileConfiguration {
         }
     }
 
+    private String stripComment(String line) {
+        int hash = -1;
+        boolean inQuotes = false;
+        char quoteChar = 0;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if ((c == '"' || c == '\'') && (i == 0 || line.charAt(i - 1) != '\\')) {
+                if (!inQuotes) {
+                    inQuotes = true;
+                    quoteChar = c;
+                } else if (quoteChar == c) {
+                    inQuotes = false;
+                }
+            } else if (c == '#' && !inQuotes) {
+                hash = i;
+                break;
+            }
+        }
+        return hash != -1 ? line.substring(0, hash) : line;
+    }
+
     private Object parseScalar(String s) {
         if (s == null || s.isEmpty()) return "";
+        s = s.trim();
+        if (s.startsWith("[") && s.endsWith("]")) {
+            String inner = s.substring(1, s.length() - 1).trim();
+            if (inner.isEmpty()) return new ArrayList<>();
+            String[] parts = inner.split(",");
+            List<Object> res = new ArrayList<>();
+            for (String p : parts) {
+                res.add(parseScalar(p.trim()));
+            }
+            return res;
+        }
         if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
             return s.substring(1, s.length() - 1).replace("\\\"", "\"").replace("\\\\", "\\");
         }
