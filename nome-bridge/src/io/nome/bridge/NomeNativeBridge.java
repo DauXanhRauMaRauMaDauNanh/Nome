@@ -8,7 +8,7 @@ import java.nio.file.Paths;
 /**
  * NomeNativeBridge binds the Java Runtime to the Native C/C++/Rust Core
  * using modern Java 22/25 Project Panama Foreign Function & Memory (FFM) API.
- * All state, worldgen, crafting, networking, and ticking live 100% in Native C/C++.
+ * All state, worldgen, entities, structures, crafting, networking, and ticking live 100% in Native C/C++.
  */
 public final class NomeNativeBridge {
 
@@ -29,6 +29,13 @@ public final class NomeNativeBridge {
     private static MethodHandle hSetItem;
     private static MethodHandle hCraft2x2;
     private static MethodHandle hCraft3x3;
+    private static MethodHandle hEntitySpawn;
+    private static MethodHandle hEntityRemove;
+    private static MethodHandle hEntityCount;
+    private static MethodHandle hEntityGetPos;
+    private static MethodHandle hEntityGetHealth;
+    private static MethodHandle hEntityDamage;
+    private static MethodHandle hLocateStructure;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -90,6 +97,27 @@ public final class NomeNativeBridge {
 
             hCraft3x3 = linker.downcallHandle(lookup.find("nome_native_craft_3x3").orElseThrow(),
                     FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+
+            hEntitySpawn = linker.downcallHandle(lookup.find("nome_native_entity_spawn").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_SHORT, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE));
+
+            hEntityRemove = linker.downcallHandle(lookup.find("nome_native_entity_remove").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_INT));
+
+            hEntityCount = linker.downcallHandle(lookup.find("nome_native_entity_count").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_LONG));
+
+            hEntityGetPos = linker.downcallHandle(lookup.find("nome_native_entity_get_pos").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+
+            hEntityGetHealth = linker.downcallHandle(lookup.find("nome_native_entity_get_health").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+
+            hEntityDamage = linker.downcallHandle(lookup.find("nome_native_entity_damage").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+
+            hLocateStructure = linker.downcallHandle(lookup.find("nome_native_locate_structure").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 
             initialized = true;
             System.out.println("[Nome-Bridge] Native engine symbols bound successfully via Project Panama FFM.");
@@ -245,6 +273,70 @@ public final class NomeNativeBridge {
         } catch (Throwable t) {
             t.printStackTrace();
             return false;
+        }
+    }
+
+    // 100% Native Entity ECS Downcalls
+    public static int spawnEntity(short type, double x, double y, double z) {
+        if (!initialized) return -1;
+        try {
+            return (int) hEntitySpawn.invokeExact(type, x, y, z);
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return -1;
+        }
+    }
+
+    public static boolean removeEntity(int entityId) {
+        if (!initialized) return false;
+        try {
+            return (boolean) hEntityRemove.invokeExact(entityId);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static long getEntityCount() {
+        if (!initialized) return 0;
+        try {
+            return (long) hEntityCount.invokeExact();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public static int getEntityHealth(int entityId) {
+        if (!initialized) return 0;
+        try {
+            return (int) hEntityGetHealth.invokeExact(entityId);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public static boolean damageEntity(int entityId, int damage) {
+        if (!initialized) return false;
+        try {
+            return (boolean) hEntityDamage.invokeExact(entityId, damage);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static int[] locateStructure(String structureName, int originChunkX, int originChunkZ) {
+        if (!initialized || structureName == null) return null;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment nameSeg = arena.allocateFrom(structureName);
+            MemorySegment pOutX = arena.allocate(ValueLayout.JAVA_INT);
+            MemorySegment pOutZ = arena.allocate(ValueLayout.JAVA_INT);
+            boolean found = (boolean) hLocateStructure.invokeExact(nameSeg, originChunkX, originChunkZ, pOutX, pOutZ);
+            if (found) {
+                return new int[] { pOutX.get(ValueLayout.JAVA_INT, 0), pOutZ.get(ValueLayout.JAVA_INT, 0) };
+            }
+            return null;
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return null;
         }
     }
 

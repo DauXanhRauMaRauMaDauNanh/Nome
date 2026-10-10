@@ -1,21 +1,27 @@
 package org.bukkit.entity;
 
 public enum EntityType {
-    PLAYER(1),
-    ZOMBIE(2),
-    SKELETON(3),
-    CREEPER(4),
-    SPIDER(5),
-    COW(6),
-    SHEEP(7),
-    PIG(8),
-    CHICKEN(9),
-    VILLAGER(10),
-    IRON_GOLEM(11),
-    ENDERMAN(12),
-    ENDER_DRAGON(13),
-    WITHER(14),
-    ITEM(15);
+    PLAYER(0),
+    ITEM(1),
+    XP_ORB(2),
+    ARROW(3),
+    TNT(4),
+    FALLING_BLOCK(5),
+
+    // Hostile Mobs
+    ZOMBIE(10),
+    SKELETON(11),
+    CREEPER(12),
+    SPIDER(13),
+    ENDERMAN(14),
+
+    // Passive & Neutral Mobs
+    COW(20),
+    PIG(21),
+    SHEEP(22),
+    CHICKEN(23),
+    VILLAGER(24),
+    IRON_GOLEM(25);
 
     private final int id;
 

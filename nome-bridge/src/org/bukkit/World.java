@@ -5,7 +5,9 @@ import java.util.List;
 import java.util.UUID;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
+import io.nome.bridge.NomeNativeBridge;
 
 public class World {
     private final String name;
@@ -50,4 +52,22 @@ public class World {
 
     public long getTime() { return time; }
     public void setTime(long time) { this.time = time; }
+
+    // 100% Native C++ Entity Spawn & ECS Management
+    public int spawnEntity(Location loc, EntityType type) {
+        if (loc == null || type == null) return -1;
+        return NomeNativeBridge.spawnEntity((short) type.getTypeId(), loc.getX(), loc.getY(), loc.getZ());
+    }
+
+    // 100% Native Procedural Structure Locator
+    public Location locateNearestStructure(String structureName, Location loc) {
+        if (loc == null || structureName == null) return null;
+        int chunkX = loc.getBlockX() >> 4;
+        int chunkZ = loc.getBlockZ() >> 4;
+        int[] result = NomeNativeBridge.locateStructure(structureName.toLowerCase(), chunkX, chunkZ);
+        if (result != null) {
+            return new Location(this, (result[0] << 4) + 8, 64, (result[1] << 4) + 8);
+        }
+        return null;
+    }
 }

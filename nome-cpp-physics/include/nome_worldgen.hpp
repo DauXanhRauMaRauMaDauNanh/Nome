@@ -29,7 +29,7 @@ private:
     static double Grad3D(int hash, double x, double y, double z);
 };
 
-// Voxel IDs matching Minecraft 26.3 / 1.21
+// Voxel IDs matching Minecraft 26.3 / 1.21.x Vanilla
 enum BlockId : uint16_t {
     BLOCK_AIR = 0,
     BLOCK_STONE = 1,
@@ -39,15 +39,48 @@ enum BlockId : uint16_t {
     BLOCK_OAK_PLANKS = 5,
     BLOCK_BEDROCK = 7,
     BLOCK_WATER = 8,
+    BLOCK_LAVA = 10,
     BLOCK_SAND = 12,
     BLOCK_GRAVEL = 13,
+    BLOCK_GOLD_ORE = 14,
+    BLOCK_IRON_ORE = 15,
+    BLOCK_COAL_ORE = 16,
     BLOCK_OAK_LOG = 17,
     BLOCK_OAK_LEAVES = 18,
     BLOCK_GLASS = 20,
+    BLOCK_LAPIS_ORE = 21,
+    BLOCK_SANDSTONE = 24,
+    BLOCK_COBWEB = 30,
+    BLOCK_TNT = 46,
+    BLOCK_BOOKSHELF = 47,
+    BLOCK_MOSSY_COBBLESTONE = 48,
+    BLOCK_TORCH = 50,
+    BLOCK_MONSTER_SPAWNER = 52,
+    BLOCK_CHEST = 54,
+    BLOCK_DIAMOND_ORE = 56,
+    BLOCK_CRAFTING_TABLE = 58,
+    BLOCK_FARMLAND = 60,
+    BLOCK_FURNACE = 61,
+    BLOCK_LADDER = 65,
+    BLOCK_RAILS = 66,
+    BLOCK_REDSTONE_ORE = 73,
+    BLOCK_OAK_FENCE = 85,
+    BLOCK_STONE_BRICKS = 98,
     BLOCK_DEEPSLATE = 100,
-    BLOCK_IRON_ORE = 15,
-    BLOCK_COAL_ORE = 16,
-    BLOCK_DIAMOND_ORE = 56
+    BLOCK_COPPER_ORE = 110,
+    BLOCK_END_PORTAL_FRAME = 120,
+    BLOCK_EMERALD_ORE = 129,
+    BLOCK_TERRACOTTA = 159,
+    
+    // Deepslate Ore variants (Y < 0)
+    BLOCK_DEEPSLATE_COAL_ORE = 201,
+    BLOCK_DEEPSLATE_IRON_ORE = 202,
+    BLOCK_DEEPSLATE_COPPER_ORE = 203,
+    BLOCK_DEEPSLATE_GOLD_ORE = 204,
+    BLOCK_DEEPSLATE_REDSTONE_ORE = 205,
+    BLOCK_DEEPSLATE_LAPIS_ORE = 206,
+    BLOCK_DEEPSLATE_DIAMOND_ORE = 207,
+    BLOCK_DEEPSLATE_EMERALD_ORE = 208
 };
 
 // Full 16x16x384 Chunk Generator (Height -64 to 319 = 384 blocks total)
@@ -57,9 +90,24 @@ public:
     void GenerateChunk(int chunk_x, int chunk_z, uint16_t* block_data_384);
 
 private:
+    int64_t world_seed;
     FastNoise terrain_noise;
     FastNoise cave_noise;
     FastNoise biome_noise;
+    FastNoise ore_noise;
+
+    // Feature generation passes
+    void GenerateTerrainBase(int chunk_x, int chunk_z, uint16_t* blocks);
+    void GenerateVanillaOres(int chunk_x, int chunk_z, uint16_t* blocks);
+    void GenerateVegetation(int chunk_x, int chunk_z, uint16_t* blocks);
+    void GenerateStructures(int chunk_x, int chunk_z, uint16_t* blocks);
+
+    // Structure Stamp helpers
+    void StampVillage(int chunk_x, int chunk_z, uint16_t* blocks);
+    void StampDungeon(int chunk_x, int chunk_z, uint16_t* blocks);
+    void StampMineshaft(int chunk_x, int chunk_z, uint16_t* blocks);
+    void StampDesertPyramid(int chunk_x, int chunk_z, uint16_t* blocks);
+    void StampStronghold(int chunk_x, int chunk_z, uint16_t* blocks);
 };
 
 } // namespace nome
@@ -70,6 +118,7 @@ extern "C" {
 
 NOME_WORLDGEN_API void nome_worldgen_generate_chunk(int chunk_x, int chunk_z, uint16_t* out_blocks, int64_t seed);
 NOME_WORLDGEN_API size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf);
+NOME_WORLDGEN_API bool nome_worldgen_locate_structure(const char* structure_name, int origin_chunk_x, int origin_chunk_z, int* out_chunk_x, int* out_chunk_z, int64_t seed);
 
 #ifdef __cplusplus
 }

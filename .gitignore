@@ -12,6 +12,8 @@ bundler/
 libraries/
 versions/
 node_modules/
+extracted_vanilla_data/
+META-INF/
 
 # OS and IDE files
 .idea/

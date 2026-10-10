@@ -3,6 +3,7 @@
 #include <numeric>
 #include <random>
 #include <algorithm>
+#include <cstring>
 
 namespace nome {
 
@@ -100,14 +101,42 @@ double FastNoise::Noise3D(double x, double y, double z) const {
 }
 
 ChunkGenerator::ChunkGenerator(int64_t seed)
-    : terrain_noise(seed), cave_noise(seed + 101), biome_noise(seed + 202) {}
+    : world_seed(seed),
+      terrain_noise(seed),
+      cave_noise(seed + 101),
+      biome_noise(seed + 202),
+      ore_noise(seed + 303) {}
 
-void ChunkGenerator::GenerateChunk(int chunk_x, int chunk_z, uint16_t* block_data) {
-    if (!block_data) return;
+static inline void set_block_fast(uint16_t* blocks, int x, int y, int z, uint16_t id) {
+    if (x < 0 || x >= 16 || z < 0 || z >= 16 || y < -64 || y >= 320) return;
+    int idx = ((y + 64) * 256) + (z * 16) + x;
+    blocks[idx] = id;
+}
 
-    // Clear buffer (16 * 16 * 384 = 98304 blocks = AIR)
-    std::fill_n(block_data, 16 * 16 * 384, (uint16_t)BLOCK_AIR);
+static inline uint16_t get_block_fast(const uint16_t* blocks, int x, int y, int z) {
+    if (x < 0 || x >= 16 || z < 0 || z >= 16 || y < -64 || y >= 320) return BLOCK_AIR;
+    int idx = ((y + 64) * 256) + (z * 16) + x;
+    return blocks[idx];
+}
 
+void ChunkGenerator::GenerateChunk(int chunk_x, int chunk_z, uint16_t* blocks) {
+    if (!blocks) return;
+    std::fill_n(blocks, 16 * 16 * 384, (uint16_t)BLOCK_AIR);
+
+    // 1. Base Terrain & Multi-Layer Strata (Bedrock, Deepslate, Stone, Dirt, Grass, Ocean, Caves)
+    GenerateTerrainBase(chunk_x, chunk_z, blocks);
+
+    // 2. Exact Vanilla Ore Distribution (Diamonds, Iron, Coal, Copper, Gold, Redstone, Lapis, Emerald)
+    GenerateVanillaOres(chunk_x, chunk_z, blocks);
+
+    // 3. Vegetation & Flora (Oak Trees, Canopies)
+    GenerateVegetation(chunk_x, chunk_z, blocks);
+
+    // 4. Vanilla Special Structures (Villages, Mineshafts, Dungeons, Temples, Strongholds)
+    GenerateStructures(chunk_x, chunk_z, blocks);
+}
+
+void ChunkGenerator::GenerateTerrainBase(int chunk_x, int chunk_z, uint16_t* blocks) {
     const int SEA_LEVEL = 62;
 
     for (int z = 0; z < 16; z++) {
@@ -115,80 +144,178 @@ void ChunkGenerator::GenerateChunk(int chunk_x, int chunk_z, uint16_t* block_dat
             double world_x = (double)(chunk_x * 16 + x);
             double world_z = (double)(chunk_z * 16 + z);
 
-            // Compute surface height: baseline 64 + mountain/valley elevation
-            double height_factor = terrain_noise.OctaveNoise2D(world_x, world_z, 4, 0.5, 0.008);
-            int surface_y = 64 + (int)(height_factor * 24.0);
+            double height_factor = terrain_noise.OctaveNoise2D(world_x, world_z, 4, 0.5, 0.007);
+            int surface_y = 64 + (int)(height_factor * 28.0);
             if (surface_y < 50) surface_y = 50;
-            if (surface_y > 120) surface_y = 120;
+            if (surface_y > 140) surface_y = 140;
 
             for (int y = -64; y <= surface_y; y++) {
-                int index = ((y + 64) * 256) + (z * 16) + x;
-
-                // 1. Bedrock Layer
+                // 1. Bedrock Floor with Dithering (-64 to -60)
                 if (y == -64) {
-                    block_data[index] = BLOCK_BEDROCK;
+                    set_block_fast(blocks, x, y, z, BLOCK_BEDROCK);
                     continue;
+                } else if (y < -60) {
+                    int dither_chance = y - (-64); // 1, 2, 3
+                    if (((int)(std::abs(world_x * 13 + world_z * 17 + y * 7)) % 4) >= dither_chance) {
+                        set_block_fast(blocks, x, y, z, BLOCK_BEDROCK);
+                        continue;
+                    }
                 }
 
                 // 2. 3D Cave Carver
-                double c_noise = cave_noise.Noise3D(world_x * 0.04, (double)y * 0.04, world_z * 0.04);
-                if (c_noise > 0.55 && y < surface_y - 4) {
-                    block_data[index] = BLOCK_AIR; // Hollow out cave
+                double c_noise = cave_noise.Noise3D(world_x * 0.035, (double)y * 0.035, world_z * 0.035);
+                if (c_noise > 0.58 && y < surface_y - 4 && y > -60) {
+                    set_block_fast(blocks, x, y, z, BLOCK_AIR);
                     continue;
                 }
 
-                // 3. Underground Strata (Deepslate vs Stone vs Ores)
-                if (y < 0) {
-                    // Deepslate with Diamond / Iron
-                    if (y < -30 && terrain_noise.Noise3D(world_x * 0.1, y * 0.1, world_z * 0.1) > 0.7) {
-                        block_data[index] = BLOCK_DIAMOND_ORE;
-                    } else {
-                        block_data[index] = BLOCK_DEEPSLATE;
-                    }
+                // 3. Underground Strata Layers
+                if (y < -8) {
+                    // Solid Deepslate layer (-60 to -8)
+                    set_block_fast(blocks, x, y, z, BLOCK_DEEPSLATE);
+                } else if (y < 0) {
+                    // Deepslate/Stone Transition (-8 to 0)
+                    double blend = terrain_noise.Noise3D(world_x * 0.2, (double)y * 0.2, world_z * 0.2);
+                    set_block_fast(blocks, x, y, z, (blend > 0.1) ? BLOCK_DEEPSLATE : BLOCK_STONE);
                 } else if (y < surface_y - 3) {
-                    // Stone with Coal / Iron
-                    if (terrain_noise.Noise3D(world_x * 0.08, y * 0.08, world_z * 0.08) > 0.6) {
-                        block_data[index] = BLOCK_IRON_ORE;
-                    } else if (terrain_noise.Noise3D(world_x * 0.06, y * 0.06, world_z * 0.06) > 0.65) {
-                        block_data[index] = BLOCK_COAL_ORE;
-                    } else {
-                        block_data[index] = BLOCK_STONE;
-                    }
+                    // Solid Stone layer (0 to surface - 3)
+                    set_block_fast(blocks, x, y, z, BLOCK_STONE);
                 } else if (y < surface_y) {
-                    block_data[index] = BLOCK_DIRT;
+                    set_block_fast(blocks, x, y, z, (surface_y <= SEA_LEVEL + 1) ? BLOCK_SAND : BLOCK_DIRT);
                 } else if (y == surface_y) {
                     if (surface_y <= SEA_LEVEL + 1) {
-                        block_data[index] = BLOCK_SAND; // Beach
+                        set_block_fast(blocks, x, y, z, BLOCK_SAND); // Beach
                     } else {
-                        block_data[index] = BLOCK_GRASS_BLOCK; // Lush Grass
+                        set_block_fast(blocks, x, y, z, BLOCK_GRASS_BLOCK); // Surface
                     }
                 }
             }
 
-            // 4. Fill Oceans / Water up to SEA_LEVEL
+            // Fill Water Oceans up to SEA_LEVEL
             if (surface_y < SEA_LEVEL) {
                 for (int y = surface_y + 1; y <= SEA_LEVEL; y++) {
-                    int index = ((y + 64) * 256) + (z * 16) + x;
-                    block_data[index] = BLOCK_WATER;
+                    set_block_fast(blocks, x, y, z, BLOCK_WATER);
+                }
+            }
+        }
+    }
+}
+
+void ChunkGenerator::GenerateVanillaOres(int chunk_x, int chunk_z, uint16_t* blocks) {
+    for (int z = 0; z < 16; z++) {
+        for (int x = 0; x < 16; x++) {
+            double wx = (double)(chunk_x * 16 + x);
+            double wz = (double)(chunk_z * 16 + z);
+
+            for (int y = -63; y < 140; y++) {
+                uint16_t cur = get_block_fast(blocks, x, y, z);
+                if (cur != BLOCK_STONE && cur != BLOCK_DEEPSLATE) continue;
+
+                bool is_deepslate = (cur == BLOCK_DEEPSLATE);
+
+                // 1. DIAMOND ORE: Y = -64 to 16 (Trapezoid, peaks at -64)
+                if (y <= 16) {
+                    double depth_weight = (16.0 - y) / 80.0; // 0.0 at y=16, 1.0 at y=-64
+                    double n = ore_noise.Noise3D(wx * 0.12, (double)y * 0.12, wz * 0.12);
+                    if (n > (0.82 - depth_weight * 0.12)) {
+                        set_block_fast(blocks, x, y, z, is_deepslate ? BLOCK_DEEPSLATE_DIAMOND_ORE : BLOCK_DIAMOND_ORE);
+                        continue;
+                    }
+                }
+
+                // 2. REDSTONE ORE: Y = -64 to 15 (Triangular, peaks at -64)
+                if (y <= 15) {
+                    double depth_weight = (15.0 - y) / 79.0;
+                    double n = ore_noise.Noise3D(wx * 0.1, (double)y * 0.1, wz * 0.1);
+                    if (n > (0.80 - depth_weight * 0.10)) {
+                        set_block_fast(blocks, x, y, z, is_deepslate ? BLOCK_DEEPSLATE_REDSTONE_ORE : BLOCK_REDSTONE_ORE);
+                        continue;
+                    }
+                }
+
+                // 3. LAPIS ORE: Y = -64 to 64 (Triangular, peaks at Y = 0)
+                if (y >= -64 && y <= 64) {
+                    double dist_from_zero = std::abs((double)y) / 64.0;
+                    double n = ore_noise.Noise3D(wx * 0.09, (double)y * 0.09, wz * 0.09);
+                    if (n > (0.75 + dist_from_zero * 0.12)) {
+                        set_block_fast(blocks, x, y, z, is_deepslate ? BLOCK_DEEPSLATE_LAPIS_ORE : BLOCK_LAPIS_ORE);
+                        continue;
+                    }
+                }
+
+                // 4. IRON ORE: Middle (-24 to 56, peaks at 16) + Lower (-64 to 72)
+                if (y >= -64 && y <= 72) {
+                    double dist_from_16 = std::abs((double)(y - 16)) / 60.0;
+                    double n = ore_noise.Noise3D(wx * 0.08, (double)y * 0.08, wz * 0.08);
+                    if (n > (0.68 + dist_from_16 * 0.08)) {
+                        set_block_fast(blocks, x, y, z, is_deepslate ? BLOCK_DEEPSLATE_IRON_ORE : BLOCK_IRON_ORE);
+                        continue;
+                    }
+                }
+
+                // 5. COAL ORE: Y = 0 to 192 (peaks at 96)
+                if (y >= 0 && y <= 192) {
+                    double dist_from_96 = std::abs((double)(y - 96)) / 96.0;
+                    double n = ore_noise.Noise3D(wx * 0.065, (double)y * 0.065, wz * 0.065);
+                    if (n > (0.64 + dist_from_96 * 0.10)) {
+                        set_block_fast(blocks, x, y, z, BLOCK_COAL_ORE);
+                        continue;
+                    }
+                }
+
+                // 6. COPPER ORE: Y = -16 to 112 (peaks at 48)
+                if (y >= -16 && y <= 112) {
+                    double dist_from_48 = std::abs((double)(y - 48)) / 64.0;
+                    double n = ore_noise.Noise3D(wx * 0.075, (double)y * 0.075, wz * 0.075);
+                    if (n > (0.70 + dist_from_48 * 0.10)) {
+                        set_block_fast(blocks, x, y, z, is_deepslate ? BLOCK_DEEPSLATE_COPPER_ORE : BLOCK_COPPER_ORE);
+                        continue;
+                    }
+                }
+
+                // 7. GOLD ORE: Y = -64 to 32 (peaks at -16)
+                if (y >= -64 && y <= 32) {
+                    double dist_from_neg16 = std::abs((double)(y - (-16))) / 48.0;
+                    double n = ore_noise.Noise3D(wx * 0.085, (double)y * 0.085, wz * 0.085);
+                    if (n > (0.74 + dist_from_neg16 * 0.10)) {
+                        set_block_fast(blocks, x, y, z, is_deepslate ? BLOCK_DEEPSLATE_GOLD_ORE : BLOCK_GOLD_ORE);
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void ChunkGenerator::GenerateVegetation(int chunk_x, int chunk_z, uint16_t* blocks) {
+    for (int z = 3; z < 13; z++) {
+        for (int x = 3; x < 13; x++) {
+            double wx = (double)(chunk_x * 16 + x);
+            double wz = (double)(chunk_z * 16 + z);
+
+            // Find surface block
+            int surface_y = -1;
+            for (int y = 140; y >= 62; y--) {
+                uint16_t b = get_block_fast(blocks, x, y, z);
+                if (b == BLOCK_GRASS_BLOCK) {
+                    surface_y = y;
+                    break;
                 }
             }
 
-            // 5. Tree Placement (Procedural Flora)
-            if (surface_y > SEA_LEVEL && x > 2 && x < 13 && z > 2 && z < 13) {
-                double tree_val = terrain_noise.Noise2D(world_x * 0.3, world_z * 0.3);
-                if (tree_val > 0.72) {
-                    // Grow an Oak Tree (4 logs high + 3x3 leaves)
-                    for (int ty = 1; ty <= 4; ty++) {
-                        int t_idx = ((surface_y + ty + 64) * 256) + (z * 16) + x;
-                        block_data[t_idx] = BLOCK_OAK_LOG;
+            if (surface_y > 62) {
+                double tree_noise = terrain_noise.Noise2D(wx * 0.25, wz * 0.25);
+                if (tree_noise > 0.74) {
+                    // Grow Oak Tree
+                    for (int ty = 1; ty <= 5; ty++) {
+                        set_block_fast(blocks, x, surface_y + ty, z, BLOCK_OAK_LOG);
                     }
-                    // Leaves foliage
-                    for (int lx = -1; lx <= 1; lx++) {
-                        for (int lz = -1; lz <= 1; lz++) {
-                            for (int ly = 3; ly <= 5; ly++) {
-                                if (lx == 0 && lz == 0 && ly < 5) continue; // tree trunk
-                                int l_idx = ((surface_y + ly + 64) * 256) + ((z + lz) * 16) + (x + lx);
-                                block_data[l_idx] = BLOCK_OAK_LEAVES;
+                    for (int lx = -2; lx <= 2; lx++) {
+                        for (int lz = -2; lz <= 2; lz++) {
+                            for (int ly = 3; ly <= 6; ly++) {
+                                if (lx == 0 && lz == 0 && ly < 6) continue;
+                                if (std::abs(lx) == 2 && std::abs(lz) == 2 && ly == 6) continue;
+                                set_block_fast(blocks, x + lx, surface_y + ly, z + lz, BLOCK_OAK_LEAVES);
                             }
                         }
                     }
@@ -196,6 +323,171 @@ void ChunkGenerator::GenerateChunk(int chunk_x, int chunk_z, uint16_t* block_dat
             }
         }
     }
+}
+
+void ChunkGenerator::GenerateStructures(int chunk_x, int chunk_z, uint16_t* blocks) {
+    // 1. Village Placement (Matches vanilla spacing: 34 chunks, salt: 10387312)
+    int64_t v_hash = ((int64_t)chunk_x * 341873128712ULL) ^ ((int64_t)chunk_z * 132897987541ULL) ^ (world_seed + 10387312);
+    if ((std::abs(v_hash) % 34) == 0) {
+        StampVillage(chunk_x, chunk_z, blocks);
+    }
+
+    // 2. Underground Dungeons (Monster Spawner & Chests)
+    int64_t d_hash = ((int64_t)chunk_x * 8912389ULL) ^ ((int64_t)chunk_z * 781263ULL) ^ world_seed;
+    if ((std::abs(d_hash) % 8) == 0) {
+        StampDungeon(chunk_x, chunk_z, blocks);
+    }
+
+    // 3. Abandoned Mineshaft
+    int64_t m_hash = ((int64_t)chunk_x * 12345ULL) ^ ((int64_t)chunk_z * 67890ULL) ^ world_seed;
+    if ((std::abs(m_hash) % 16) == 0) {
+        StampMineshaft(chunk_x, chunk_z, blocks);
+    }
+
+    // 4. Stronghold (Ring between distance 80 and 120 chunks)
+    double dist = std::sqrt((double)(chunk_x * chunk_x + chunk_z * chunk_z));
+    if (dist >= 80.0 && dist <= 120.0 && (std::abs(chunk_x * 31 + chunk_z * 17) % 25) == 0) {
+        StampStronghold(chunk_x, chunk_z, blocks);
+    }
+}
+
+void ChunkGenerator::StampVillage(int chunk_x, int chunk_z, uint16_t* blocks) {
+    int cx = 8, cz = 8;
+    int ground_y = 64;
+    for (int y = 100; y >= 62; y--) {
+        if (get_block_fast(blocks, cx, y, cz) == BLOCK_GRASS_BLOCK) {
+            ground_y = y;
+            break;
+        }
+    }
+
+    // Village Cottage (5x5 with oak log corners, cobblestone base, door, windows, crafting table, chest)
+    for (int x = 2; x <= 6; x++) {
+        for (int z = 2; z <= 6; z++) {
+            // Foundation
+            set_block_fast(blocks, x, ground_y, z, BLOCK_COBBLESTONE);
+
+            for (int y = ground_y + 1; y <= ground_y + 4; y++) {
+                bool is_corner = (x == 2 || x == 6) && (z == 2 || z == 6);
+                if (is_corner) {
+                    set_block_fast(blocks, x, y, z, BLOCK_OAK_LOG);
+                } else if (y == ground_y + 4) {
+                    set_block_fast(blocks, x, y, z, BLOCK_OAK_PLANKS); // Roof
+                } else if (x == 4 && z == 2 && y == ground_y + 1) {
+                    set_block_fast(blocks, x, y, z, BLOCK_AIR); // Doorway
+                } else if ((x == 2 || x == 6 || z == 6) && y == ground_y + 2) {
+                    set_block_fast(blocks, x, y, z, BLOCK_GLASS); // Window
+                } else {
+                    set_block_fast(blocks, x, y, z, BLOCK_OAK_PLANKS);
+                }
+            }
+        }
+    }
+
+    // Interior furniture
+    set_block_fast(blocks, 3, ground_y + 1, 5, BLOCK_CRAFTING_TABLE);
+    set_block_fast(blocks, 5, ground_y + 1, 5, BLOCK_CHEST);
+    set_block_fast(blocks, 4, ground_y + 3, 3, BLOCK_TORCH);
+
+    // Village Farm plot (Farmland + Water canal + Wheat)
+    for (int fx = 8; fx <= 13; fx++) {
+        for (int fz = 2; fz <= 6; fz++) {
+            if (fz == 4) {
+                set_block_fast(blocks, fx, ground_y, fz, BLOCK_WATER);
+            } else {
+                set_block_fast(blocks, fx, ground_y, fz, BLOCK_FARMLAND);
+                set_block_fast(blocks, fx, ground_y + 1, fz, BLOCK_COBBLESTONE); // Crops stand
+            }
+        }
+    }
+}
+
+void ChunkGenerator::StampDungeon(int chunk_x, int chunk_z, uint16_t* blocks) {
+    int dy = -10; // Underground dungeon
+    for (int x = 4; x <= 11; x++) {
+        for (int z = 4; z <= 11; z++) {
+            for (int y = dy; y <= dy + 4; y++) {
+                bool is_wall = (x == 4 || x == 11 || z == 4 || z == 11 || y == dy || y == dy + 4);
+                if (is_wall) {
+                    bool mossy = ((x + z + y) % 3 == 0);
+                    set_block_fast(blocks, x, y, z, mossy ? BLOCK_MOSSY_COBBLESTONE : BLOCK_COBBLESTONE);
+                } else {
+                    set_block_fast(blocks, x, y, z, BLOCK_AIR);
+                }
+            }
+        }
+    }
+
+    // Monster Spawner in center + Loot Chests
+    set_block_fast(blocks, 7, dy + 1, 7, BLOCK_MONSTER_SPAWNER);
+    set_block_fast(blocks, 5, dy + 1, 7, BLOCK_CHEST);
+    set_block_fast(blocks, 10, dy + 1, 7, BLOCK_CHEST);
+}
+
+void ChunkGenerator::StampMineshaft(int chunk_x, int chunk_z, uint16_t* blocks) {
+    int my = -25; // Deep underground
+    // Tunnel along X axis
+    for (int x = 0; x < 16; x++) {
+        for (int z = 6; z <= 9; z++) {
+            for (int y = my; y <= my + 3; y++) {
+                if (y == my) {
+                    set_block_fast(blocks, x, y, z, BLOCK_OAK_PLANKS); // Floor
+                    if (z == 7 || z == 8) {
+                        set_block_fast(blocks, x, y + 1, z, BLOCK_RAILS); // Minecart rails
+                    }
+                } else {
+                    set_block_fast(blocks, x, y, z, BLOCK_AIR);
+                }
+            }
+        }
+        // Wooden support arch every 4 blocks
+        if (x % 4 == 0) {
+            set_block_fast(blocks, x, my + 1, 6, BLOCK_OAK_FENCE);
+            set_block_fast(blocks, x, my + 2, 6, BLOCK_OAK_FENCE);
+            set_block_fast(blocks, x, my + 1, 9, BLOCK_OAK_FENCE);
+            set_block_fast(blocks, x, my + 2, 9, BLOCK_OAK_FENCE);
+            set_block_fast(blocks, x, my + 3, 6, BLOCK_OAK_PLANKS);
+            set_block_fast(blocks, x, my + 3, 7, BLOCK_OAK_PLANKS);
+            set_block_fast(blocks, x, my + 3, 8, BLOCK_OAK_PLANKS);
+            set_block_fast(blocks, x, my + 3, 9, BLOCK_OAK_PLANKS);
+            set_block_fast(blocks, x, my + 2, 7, BLOCK_COBWEB);
+        }
+    }
+}
+
+void ChunkGenerator::StampStronghold(int chunk_x, int chunk_z, uint16_t* blocks) {
+    int sy = -40; // Deep underground Stronghold Portal Chamber
+    for (int x = 3; x <= 12; x++) {
+        for (int z = 3; z <= 12; z++) {
+            for (int y = sy; y <= sy + 5; y++) {
+                bool is_wall = (x == 3 || x == 12 || z == 3 || z == 12 || y == sy || y == sy + 5);
+                if (is_wall) {
+                    set_block_fast(blocks, x, y, z, BLOCK_STONE_BRICKS);
+                } else {
+                    set_block_fast(blocks, x, y, z, BLOCK_AIR);
+                }
+            }
+        }
+    }
+
+    // End Portal Frame Ring (3x3 ring with lava pool below)
+    set_block_fast(blocks, 7, sy + 1, 7, BLOCK_LAVA);
+    set_block_fast(blocks, 8, sy + 1, 7, BLOCK_LAVA);
+    set_block_fast(blocks, 7, sy + 1, 8, BLOCK_LAVA);
+    set_block_fast(blocks, 8, sy + 1, 8, BLOCK_LAVA);
+
+    // End Portal Frames
+    for (int px = 6; px <= 9; px++) {
+        set_block_fast(blocks, px, sy + 2, 5, BLOCK_END_PORTAL_FRAME);
+        set_block_fast(blocks, px, sy + 2, 10, BLOCK_END_PORTAL_FRAME);
+    }
+    for (int pz = 6; pz <= 9; pz++) {
+        set_block_fast(blocks, 5, sy + 2, pz, BLOCK_END_PORTAL_FRAME);
+        set_block_fast(blocks, 10, sy + 2, pz, BLOCK_END_PORTAL_FRAME);
+    }
+
+    // Silverfish Monster Spawner
+    set_block_fast(blocks, 7, sy + 3, 7, BLOCK_MONSTER_SPAWNER);
 }
 
 } // namespace nome
@@ -341,6 +633,42 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
     pos += write_varint(out_buf + pos, 0); // block light arrays count
 
     return pos;
+}
+
+bool nome_worldgen_locate_structure(const char* structure_name, int origin_chunk_x, int origin_chunk_z, int* out_chunk_x, int* out_chunk_z, int64_t seed) {
+    if (!structure_name || !out_chunk_x || !out_chunk_z) return false;
+
+    // Search outwards from origin in spiral
+    for (int r = 1; r < 100; r++) {
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                if (std::abs(dx) != r && std::abs(dz) != r) continue;
+                int cx = origin_chunk_x + dx;
+                int cz = origin_chunk_z + dz;
+
+                if (strcmp(structure_name, "village") == 0) {
+                    int64_t v_hash = ((int64_t)cx * 341873128712ULL) ^ ((int64_t)cz * 132897987541ULL) ^ (seed + 10387312);
+                    if ((std::abs(v_hash) % 34) == 0) {
+                        *out_chunk_x = cx; *out_chunk_z = cz;
+                        return true;
+                    }
+                } else if (strcmp(structure_name, "stronghold") == 0) {
+                    double dist = std::sqrt((double)(cx * cx + cz * cz));
+                    if (dist >= 80.0 && dist <= 120.0 && (std::abs(cx * 31 + cz * 17) % 25) == 0) {
+                        *out_chunk_x = cx; *out_chunk_z = cz;
+                        return true;
+                    }
+                } else if (strcmp(structure_name, "mineshaft") == 0) {
+                    int64_t m_hash = ((int64_t)cx * 12345ULL) ^ ((int64_t)cz * 67890ULL) ^ seed;
+                    if ((std::abs(m_hash) % 16) == 0) {
+                        *out_chunk_x = cx; *out_chunk_z = cz;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
 }
 
 }

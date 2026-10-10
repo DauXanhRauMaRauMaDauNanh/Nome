@@ -2,6 +2,7 @@
 #include "nome_physics.hpp"
 #include "nome_worldgen.hpp"
 #include "nome_crafting.hpp"
+#include "nome_entity.hpp"
 #include <chrono>
 #include <thread>
 #include <mutex>
@@ -73,7 +74,19 @@ static void native_tick_loop() {
             nome_net_poll_events(g_server->network, 0);
         }
 
-        // 2. Physics & collision pass (C++ AABB checks)
+        // 2. Collect players & Tick Native Entity System (AABB physics, Mob AI, Gravity)
+        std::vector<nome::NativePlayerTarget> targets;
+        if (g_server->network) {
+            for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
+                NomeClientSession* c = nome_net_get_client(g_server->network, (uint64_t)i);
+                if (c && c->is_active && c->state == NOME_STATE_PLAY) {
+                    targets.push_back({(uint64_t)c->socket_fd, c->x, c->y, c->z});
+                }
+            }
+        }
+        nome::EntityManager::Instance().Tick(g_server->spawn_blocks, targets);
+
+        // 3. Physics & collision pass (C++ AABB checks)
         g_server->tick_counter.fetch_add(1);
 
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -94,7 +107,7 @@ static void native_tick_loop() {
 extern "C" {
 
 NOME_EXPORT const char* nome_rust_version() {
-    return "Nome-Core v0.3.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/Crafting/Lighting) + Rust Architecture]";
+    return "Nome-Core v0.4.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/Crafting/Entities/Lighting) + Rust Architecture]";
 }
 
 NOME_EXPORT bool nome_native_init() {
@@ -104,6 +117,13 @@ NOME_EXPORT bool nome_native_init() {
         // Procedurally generate the spawn world in pure Native C++ (Perlin 3D Noise)
         printf("[Nome-Core] Procedurally generating 3D Voxel World (Height: -64 to 319)...\n");
         nome_worldgen_generate_chunk(0, 0, g_server->spawn_blocks, 1337);
+
+        // Spawn initial vanilla mobs (Villager, Cow, Sheep, Zombie) into native ECS
+        printf("[Nome-Core] Spawning Initial Vanilla Entities (Villager, Cow, Sheep, Zombie)...\n");
+        nome::EntityManager::Instance().Spawn(nome::ENTITY_VILLAGER, 8.5, 65.0, 8.5);
+        nome::EntityManager::Instance().Spawn(nome::ENTITY_COW, 5.5, 65.0, 5.5);
+        nome::EntityManager::Instance().Spawn(nome::ENTITY_SHEEP, 11.5, 65.0, 5.5);
+        nome::EntityManager::Instance().Spawn(nome::ENTITY_ZOMBIE, 12.5, 65.0, 12.5);
 
         g_server->network = nome_net_create("0.0.0.0", 25565, 4);
         nome_net_set_callbacks(g_server->network,
@@ -258,6 +278,35 @@ NOME_EXPORT bool nome_native_craft_2x2(uint16_t in0, uint16_t in1, uint16_t in2,
 
 NOME_EXPORT bool nome_native_craft_3x3(const uint16_t* grid9, uint16_t* out_item, uint8_t* out_count) {
     return nome::CraftingManager::Instance().MatchGrid(grid9, 3, out_item, out_count);
+}
+
+// 100% Native Entity ECS Exports
+NOME_EXPORT int32_t nome_native_entity_spawn(uint16_t type, double x, double y, double z) {
+    return nome::EntityManager::Instance().Spawn(type, x, y, z);
+}
+
+NOME_EXPORT bool nome_native_entity_remove(int32_t entity_id) {
+    return nome::EntityManager::Instance().Remove(entity_id);
+}
+
+NOME_EXPORT size_t nome_native_entity_count() {
+    return nome::EntityManager::Instance().GetCount();
+}
+
+NOME_EXPORT bool nome_native_entity_get_pos(int32_t entity_id, double* x, double* y, double* z, float* yaw, float* pitch) {
+    return nome_entity_get_pos(entity_id, x, y, z, yaw, pitch);
+}
+
+NOME_EXPORT int32_t nome_native_entity_get_health(int32_t entity_id) {
+    return nome_entity_get_health(entity_id);
+}
+
+NOME_EXPORT bool nome_native_entity_damage(int32_t entity_id, int32_t damage) {
+    return nome_entity_damage(entity_id, damage);
+}
+
+NOME_EXPORT bool nome_native_locate_structure(const char* name, int origin_cx, int origin_cz, int* out_cx, int* out_cz) {
+    return nome_worldgen_locate_structure(name, origin_cx, origin_cz, out_cx, out_cz, 1337);
 }
 
 }

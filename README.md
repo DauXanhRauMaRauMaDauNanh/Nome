@@ -15,7 +15,10 @@
 * **⚡ 100% Native Core Engine (C + C++ + Rust)**:
   * **C Layer (`nome-c-net`)**: Ultra-low latency asynchronous TCP networking with **Windows IOCP** and **Linux epoll/io_uring**, SIMD VarInt/VarLong codecs, and zero-allocation packet arena buffers (Zero GC overhead).
   * **C++ Layer (`nome-cpp-physics`)**:
-    * **Procedural 3D World Generation**: Fast Perlin/Simplex noise generator (-64 to 319 height), Bedrock layer, Deepslate with Diamond veins, Stone with Iron/Coal, 3D Cave Carvers, Oceans, Sand beaches, and Oak Trees.
+    * **1:1 Vanilla Layer & Ore Distribution**: Exact vertical layers (-64 to 319): Bedrock floor (-64..-60) with dithering, solid Deepslate (-60..-8), Deepslate/Stone transition (-8..0), Stone, Dirt, Grass, Sand beaches, and Water oceans (Y=62).
+    * **Full Vanilla Ore Generation**: Matches exact `placed_feature/*.json` distributions: Diamond (-64..16, trapezoid peaking at -64), Redstone (-64..15), Lapis (-64..64), Iron (-64..72, -24..56, 80..384), Coal (0..192, 136..320), Copper (-16..112), Gold (-64..32), and Emerald (100..320).
+    * **Vanilla Procedural Structures**: Villages (cottages, wells, farms), Mineshafts (tunnels, rails, fences, cobwebs), Dungeons (Monster Spawners & chests), Desert Pyramids (TNT traps), and Strongholds (Stone brick library & End Portal room).
+    * **Native Entity ECS & Mob AI**: 100% C++ Entity Manager with AABB voxel physics, gravity, and AI behaviors (Zombie/Skeleton targeting player, Creeper fuse, passive mob wander).
     * **Paletted Chunk Serializer**: Serializes full 24-section chunk packets with indirect palettes directly in C++ off-heap memory.
     * **Full 2x2 & 3x3 Crafting Engine**: Native shaped and shapeless recipe solver supporting 50+ vanilla recipes (planks, sticks, tools, armor, tables, torches, chests, furnaces, bread, swords).
     * **Physics & Lighting**: SIMD AABB voxel collision detection and **Starlight Bitmask BFS 15-level Light Engine**.

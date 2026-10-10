@@ -7,7 +7,9 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.entity.EntityType;
 
 public class ExamplePlugin extends JavaPlugin implements Listener {
 
@@ -21,7 +23,7 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
         getLogger().info("[ExamplePlugin] Enabling standard Bukkit/Paper plugin features on Native Core!");
         getServer().getPluginManager().registerEvents(this, this);
 
-        // Verify Native C++ Crafting from Java Bukkit API
+        // 1. Verify Native C++ Crafting from Java Bukkit API
         short[] res2x2 = new short[2];
         if (Bukkit.craft2x2((short) 17, (short) 0, (short) 0, (short) 0, res2x2)) {
             getLogger().info("[ExamplePlugin] Native C++ Crafting Verified: 1 Oak Log -> Item " + res2x2[0] + " x" + res2x2[1] + " (Planks)");
@@ -35,6 +37,19 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
         short[] res3x3 = new short[2];
         if (Bukkit.craft3x3(grid9, res3x3)) {
             getLogger().info("[ExamplePlugin] Native C++ 3x3 Crafting Verified: 3 Planks + 2 Sticks -> Item " + res3x3[0] + " x" + res3x3[1] + " (Wooden Pickaxe)");
+        }
+
+        // 2. Verify Native C++ Entity Spawning into Native ECS
+        if (getServer().getWorld("world") != null) {
+            Location spawnLoc = new Location(getServer().getWorld("world"), 10.5, 65.0, 10.5);
+            int entityId = getServer().getWorld("world").spawnEntity(spawnLoc, EntityType.ZOMBIE);
+            getLogger().info("[ExamplePlugin] Native Entity Spawned in C++ ECS: Zombie ID #" + entityId);
+
+            // 3. Verify Native Structure Locator
+            Location villageLoc = getServer().getWorld("world").locateNearestStructure("village", spawnLoc);
+            if (villageLoc != null) {
+                getLogger().info("[ExamplePlugin] Located Procedural Village at: (" + villageLoc.getBlockX() + ", " + villageLoc.getBlockZ() + ")");
+            }
         }
 
         // Schedule a recurring task using BukkitScheduler
