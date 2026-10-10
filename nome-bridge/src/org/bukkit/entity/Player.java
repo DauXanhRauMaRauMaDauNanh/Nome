@@ -13,6 +13,7 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 import io.nome.bridge.NomeNativeBridge;
+import io.nome.bridge.util.MinecraftConsole;
 
 public class Player implements Entity, CommandSender, OfflinePlayer {
     private final int entityId;
@@ -103,7 +104,6 @@ public class Player implements Entity, CommandSender, OfflinePlayer {
 
     @Override
     public void sendMessage(String message) {
-        System.out.println("[Chat to " + name + "] " + message);
         NomeNativeBridge.broadcastMessage("§7[" + name + "]: " + message);
     }
 
@@ -113,11 +113,9 @@ public class Player implements Entity, CommandSender, OfflinePlayer {
     }
 
     public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
-        System.out.println("[Title to " + name + "] " + title + " / " + subtitle);
     }
 
     public void sendActionBar(String message) {
-        System.out.println("[ActionBar to " + name + "] " + message);
     }
 
     @Override
@@ -126,7 +124,7 @@ public class Player implements Entity, CommandSender, OfflinePlayer {
         this.world = loc.getWorld();
         this.location = loc.clone();
         NomeNativeBridge.teleportPlayer((long) entityId, loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch());
-        System.out.println("[Nome-Server] Teleported player " + name + " to " + loc);
+        MinecraftConsole.info("Teleported player " + name + " to " + loc);
     }
 
     // Direct Off-Heap Native Access (Zero GC Allocations)
@@ -150,7 +148,7 @@ public class Player implements Entity, CommandSender, OfflinePlayer {
     }
 
     public void kickPlayer(String message) {
-        System.out.println("[Nome-Server] Kicked player " + name + ": " + message);
+        MinecraftConsole.info("Kicked player " + name + ": " + message);
     }
 
     public InetSocketAddress getAddress() {

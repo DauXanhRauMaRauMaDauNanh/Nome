@@ -5,6 +5,7 @@ import java.nio.file.*;
 import java.util.*;
 import io.nome.bridge.NomeNativeBridge;
 import io.nome.bridge.NomeServer;
+import io.nome.bridge.util.MinecraftConsole;
 
 /**
  * Nome Bootstrap Launcher (.jar Entry Point)
@@ -15,48 +16,60 @@ import io.nome.bridge.NomeServer;
  * 2. Host Compatibility: Gracefully parses and filters exotic hosting flags
  *    (Pterodactyl, Multicraft, Aikar's flags, nogui, --port, -P, etc.).
  * 3. Auto EULA & Configuration: Automatically generates eula.txt and server.properties.
+ * 4. Authentic Minecraft / Paper / Leaf console output with ANSI coloring.
  */
 public class Main {
 
     public static void main(String[] args) {
-        System.out.println("==================================================");
-        System.out.println("  _  _  ___  __  __ ___   ___  ___   ___ _____ ___   ");
-        System.out.println(" | \\| |/ _ \\|  \\/  | __| | _ )/ _ \\ / _ \\_   _/ __|  ");
-        System.out.println(" | .` | (_) | |\\/| | _|  | _ \\ (_) | (_) || | \\__ \\  ");
-        System.out.println(" |_|\\_|\\___/|_|  |_|___| |___/\\___/ \\___/ |_| |___/  ");
-        System.out.println("==================================================");
-        System.out.println("[Nome-Bootstrap] Starting Nome Standalone Server Runtime...");
+        // Initialize Authentic Minecraft Console Logger & Formatter
+        MinecraftConsole.init();
+
+        // Sleek Paper / Leaf style Banner
+        System.out.println("\u001b[96m  _   _   ___   __  __  ___ \u001b[0m");
+        System.out.println("\u001b[96m | \\ | | / _ \\ |  \\/  || __|\u001b[0m  \u001b[1mNome Server - 100% Native C/C++/Rust Core\u001b[0m");
+        System.out.println("\u001b[96m |  \\| || (_) || |\\/| || _|\u001b[0m   Minecraft 26.3 / 1.20.4 (Protocol 777)");
+        System.out.println("\u001b[96m |_|\\__| \\___/ |_|  |_||___|\u001b[0m  Ultra High-Performance & Off-Heap Memory\n");
 
         // 1. Process and filter Hosting Flags & Arguments
         ParsedHostArgs hostConfig = parseHostingArguments(args);
-        System.out.println("[Nome-Bootstrap] Host Configuration -> Port: " + hostConfig.port + ", World: " + hostConfig.worldName);
 
         // 2. Auto-generate eula.txt and server.properties for hosting panels
         ensureEulaAccepted();
         ensureServerProperties(hostConfig.port);
 
-        // 3. Detect Platform & CPU Architecture
+        // 3. Minecraft Standard Server Startup Logs
+        MinecraftConsole.info("Starting minecraft server version 1.20.4");
+        MinecraftConsole.info("Loading properties");
+        MinecraftConsole.info("This server is running Nome version 26.3-NATIVE (Protocol 777) (Implementing API version 1.21.4-R0.1-SNAPSHOT)");
+        MinecraftConsole.info("Server Ping Player Sample: 0/100");
+        MinecraftConsole.info("Using 4 threads for Netty/IOCP event loop");
+        MinecraftConsole.info("Generating keypair");
+        MinecraftConsole.info("Starting Minecraft server on *:" + hostConfig.port);
+        MinecraftConsole.info("Using default channel type");
+
+        // 4. Detect Platform & CPU Architecture
         String os = System.getProperty("os.name").toLowerCase();
         String arch = System.getProperty("os.arch").toLowerCase();
-        System.out.println("[Nome-Bootstrap] Platform: " + os + " | Arch: " + arch);
-        System.out.println("[Nome-Bootstrap] Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")");
 
-        // 4. Extract bundled native binaries from Nome.jar (Zero external dependencies)
+        // 5. Extract bundled native binaries from Nome.jar (Zero external dependencies)
         File nativeDir = extractBundledNatives(os, arch);
 
-        // 5. Bind Native C/C++/Rust Engine via Project Panama FFM
+        // 6. Bind Native C/C++/Rust Engine via Project Panama FFM
         boolean bound = NomeNativeBridge.loadNativeEngine(nativeDir.getAbsolutePath());
         if (!bound) {
-            System.err.println("[Nome-Bootstrap] FATAL: Could not bind native C/C++/Rust engine!");
+            MinecraftConsole.error("FATAL: Could not bind native C/C++/Rust engine!");
             System.exit(1);
         }
 
-        // 6. Start Nome Server Core
+        // 7. Start Nome Server Core
         NomeServer server = new NomeServer();
-        Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "Nome-Shutdown-Hook"));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            MinecraftConsole.info("Stopping the server");
+            server.stop();
+        }, "Nome-Shutdown-Hook"));
         server.start();
 
-        // 7. Engine is ticked by high-precision native OS thread in C++ (0% Java CPU overhead)
+        // 8. Engine is ticked by high-precision native OS thread in C++ (0% Java CPU overhead)
         try {
             while (true) {
                 Thread.sleep(1000);
@@ -100,7 +113,6 @@ public class Main {
         if (!eulaFile.exists()) {
             try {
                 Files.writeString(eulaFile.toPath(), "# By changing the setting below to TRUE you are indicating your agreement to the EULA.\neula=true\n");
-                System.out.println("[Nome-Bootstrap] Auto-created eula.txt (eula=true)");
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -120,7 +132,6 @@ public class Main {
                         "online-mode=false\n" +
                         "motd=§b§lNome §8- §a100% Native C/C++/Rust Server\n";
                 Files.writeString(propFile.toPath(), defaultProps);
-                System.out.println("[Nome-Bootstrap] Auto-created server.properties on port " + port);
             } catch (IOException e) {
                 e.printStackTrace();
             }

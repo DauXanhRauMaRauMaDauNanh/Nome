@@ -13,6 +13,8 @@
 #include <cstring>
 
 #ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #include <windows.h>
   #define NOME_EXPORT __declspec(dllexport)
 #else
   #define NOME_EXPORT __attribute__((visibility("default")))
@@ -44,53 +46,60 @@ struct NativeServerState {
 
 static NativeServerState* g_server = nullptr;
 
+static NomeOnPlayerJoinFn g_cb_on_join = nullptr;
+static NomeOnPlayerQuitFn g_cb_on_quit = nullptr;
+static NomeOnPlayerChatFn g_cb_on_chat = nullptr;
+static NomeOnBlockBreakFn g_cb_on_break = nullptr;
+static NomeOnPlayerMoveFn g_cb_on_move = nullptr;
+static NomeOnPacketReceiveFn g_cb_on_recv = nullptr;
+static NomeOnPacketSendFn g_cb_on_send = nullptr;
+
 static void internal_on_player_join(uint64_t player_id, const char *username) {
-    if (g_server && g_server->java_on_join) {
-        g_server->java_on_join(player_id, username);
+    if (g_cb_on_join) {
+        g_cb_on_join(player_id, username);
     }
 }
 
 static void internal_on_player_quit(uint64_t player_id) {
-    if (g_server && g_server->java_on_quit) {
-        g_server->java_on_quit(player_id);
+    if (g_cb_on_quit) {
+        g_cb_on_quit(player_id);
     }
 }
 
 static void internal_on_player_chat(uint64_t player_id, const char *message) {
-    if (g_server && g_server->java_on_chat) {
-        g_server->java_on_chat(player_id, message);
+    if (g_cb_on_chat) {
+        g_cb_on_chat(player_id, message);
     }
 }
 
 static void internal_on_block_break(uint64_t player_id, int32_t x, int32_t y, int32_t z) {
-    if (g_server && g_server->java_on_break) {
-        g_server->java_on_break(player_id, x, y, z);
+    if (g_cb_on_break) {
+        g_cb_on_break(player_id, x, y, z);
     }
 }
 
 static bool internal_on_player_move(uint64_t player_id, double from_x, double from_y, double from_z, double to_x, double to_y, double to_z, bool on_ground) {
-    if (g_server && g_server->java_on_move) {
-        return g_server->java_on_move(player_id, from_x, from_y, from_z, to_x, to_y, to_z, on_ground);
+    if (g_cb_on_move) {
+        return g_cb_on_move(player_id, from_x, from_y, from_z, to_x, to_y, to_z, on_ground);
     }
     return true;
 }
 
 static bool internal_on_packet_receive(uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len) {
-    if (g_server && g_server->java_on_packet_recv) {
-        return g_server->java_on_packet_recv(player_id, packet_id, payload, len);
+    if (g_cb_on_recv) {
+        return g_cb_on_recv(player_id, packet_id, payload, len);
     }
     return true;
 }
 
 static bool internal_on_packet_send(uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len) {
-    if (g_server && g_server->java_on_packet_send) {
-        return g_server->java_on_packet_send(player_id, packet_id, payload, len);
+    if (g_cb_on_send) {
+        return g_cb_on_send(player_id, packet_id, payload, len);
     }
     return true;
 }
 
 static void native_tick_loop() {
-    printf("[Nome-Core] Native High-Precision 20 TPS OS Thread Started.\n");
     while (g_server && g_server->is_running.load()) {
         auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -126,7 +135,6 @@ static void native_tick_loop() {
             g_server->rolling_tps = (ms > 0.0) ? (1000.0 / ms) : 20.0;
         }
     }
-    printf("[Nome-Core] Native Tick Loop Stopped.\n");
 }
 
 extern "C" {
@@ -135,17 +143,31 @@ NOME_EXPORT const char* nome_rust_version() {
     return "Nome-Core v0.5.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/ChunkManager/Crafting/Entities) + Rust Architecture]";
 }
 
+#ifdef _WIN32
+static void enable_windows_ansi() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hOut, &dwMode)) {
+            SetConsoleMode(hOut, dwMode | 0x0004); // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        }
+    }
+    SetConsoleOutputCP(CP_UTF8);
+}
+#endif
+
 NOME_EXPORT bool nome_native_init() {
     if (!g_server) {
+#ifdef _WIN32
+        enable_windows_ansi();
+#endif
         g_server = new NativeServerState();
         
         // Initialize multi-chunk manager and procedural terrain generator
-        printf("[Nome-Core] Initializing Off-Heap Smart Chunk Manager (Seed: 1337)...\n");
         nome_chunk_init(1337);
         nome_chunk_load(0, 0);
 
         // Spawn initial vanilla mobs (Villager, Cow, Sheep, Zombie) into native ECS
-        printf("[Nome-Core] Spawning Initial Vanilla Entities (Villager, Cow, Sheep, Zombie)...\n");
         nome::EntityManager::Instance().Spawn(nome::ENTITY_VILLAGER, 8.5, 65.0, 8.5);
         nome::EntityManager::Instance().Spawn(nome::ENTITY_COW, 5.5, 65.0, 5.5);
         nome::EntityManager::Instance().Spawn(nome::ENTITY_SHEEP, 11.5, 65.0, 5.5);
@@ -201,15 +223,13 @@ NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,
                                               NomeOnPlayerMoveFn on_move,
                                               NomeOnPacketReceiveFn on_recv,
                                               NomeOnPacketSendFn on_send) {
-    if (g_server) {
-        g_server->java_on_join = on_join;
-        g_server->java_on_quit = on_quit;
-        g_server->java_on_chat = on_chat;
-        g_server->java_on_break = on_break;
-        g_server->java_on_move = on_move;
-        g_server->java_on_packet_recv = on_recv;
-        g_server->java_on_packet_send = on_send;
-    }
+    g_cb_on_join = on_join;
+    g_cb_on_quit = on_quit;
+    g_cb_on_chat = on_chat;
+    g_cb_on_break = on_break;
+    g_cb_on_move = on_move;
+    g_cb_on_recv = on_recv;
+    g_cb_on_send = on_send;
 }
 
 NOME_EXPORT void nome_native_send_raw_packet(uint64_t player_id, int32_t packet_id, const uint8_t* payload, size_t len) {

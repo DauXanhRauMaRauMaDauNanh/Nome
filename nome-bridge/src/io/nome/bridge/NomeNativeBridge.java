@@ -6,6 +6,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -14,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.*;
 import com.comphenix.protocol.ProtocolLibrary;
+import io.nome.bridge.util.MinecraftConsole;
 
 /**
  * NomeNativeBridge binds the Java Runtime to the Native C/C++/Rust Core
@@ -68,7 +70,6 @@ public final class NomeNativeBridge {
                 dllPath = Paths.get("bin", "native", System.mapLibraryName("nome_core")).toAbsolutePath();
             }
 
-            System.out.println("[Nome-Bridge] Loading native engine from: " + dllPath);
             SymbolLookup lookup = SymbolLookup.libraryLookup(dllPath, Arena.global());
             Linker linker = Linker.nativeLinker();
 
@@ -174,7 +175,6 @@ public final class NomeNativeBridge {
             registerUpcalls(linker);
 
             initialized = true;
-            System.out.println("[Nome-Bridge] Native engine symbols bound successfully via Project Panama FFM.");
             return true;
         } catch (Throwable t) {
             System.err.println("[Nome-Bridge] Failed to load native library via Panama: " + t.getMessage());
@@ -223,7 +223,6 @@ public final class NomeNativeBridge {
                     FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG), Arena.global());
 
             hRegisterCallbacks.invokeExact(stubJoin, stubQuit, stubChat, stubBreak, stubMove, stubRecv, stubSend);
-            System.out.println("[Nome-Bridge] Project Panama zero-overhead Upcall Stubs (Events + Packet Interceptors) registered.");
         } catch (Throwable t) {
             System.err.println("[Nome-Bridge] Warning: Failed to register native upcall callbacks: " + t.getMessage());
         }
@@ -235,12 +234,18 @@ public final class NomeNativeBridge {
 
     public static void nativeCallbackOnJoin(long playerId, MemorySegment usernameSeg) {
         try {
-            String username = usernameSeg.getString(0);
+            String username = usernameSeg.reinterpret(256).getString(0);
             NomeServer server = NomeServer.getInstance();
             if (server != null) {
                 World w = server.getWorlds().isEmpty() ? null : server.getWorlds().get(0);
-                Player p = new Player((int) playerId, username, UUID.randomUUID(), w, new Location(w, 0.5, 64.0, 0.5), server);
+                UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
+                Player p = new Player((int) playerId, username, uuid, w, new Location(w, 0.5, 64.0, 0.5), server);
                 server.registerPlayer(p);
+
+                MinecraftConsole.info("UUID of player " + username + " is " + uuid);
+                MinecraftConsole.info(username + "[/127.0.0.1:" + playerId + "] logged in with entity id " + p.getEntityId() + " at ([world]0.5, 64.0, 0.5)");
+                MinecraftConsole.info(username + " joined the game");
+
                 server.getPluginManager().callEvent(new PlayerJoinEvent(p, "§e" + username + " joined the game"));
             }
         } catch (Throwable t) {
@@ -254,6 +259,8 @@ public final class NomeNativeBridge {
             if (server != null) {
                 Player p = server.getPlayerById((int) playerId);
                 if (p != null) {
+                    MinecraftConsole.info(p.getName() + " lost connection: Disconnected");
+                    MinecraftConsole.info(p.getName() + " left the game");
                     server.getPluginManager().callEvent(new PlayerQuitEvent(p, "§e" + p.getName() + " left the game"));
                     server.unregisterPlayer(p);
                 }
@@ -265,11 +272,16 @@ public final class NomeNativeBridge {
 
     public static void nativeCallbackOnChat(long playerId, MemorySegment msgSeg) {
         try {
-            String msg = msgSeg.getString(0);
+            String msg = msgSeg.reinterpret(1024).getString(0);
             NomeServer server = NomeServer.getInstance();
             if (server != null) {
                 Player p = server.getPlayerById((int) playerId);
                 if (p != null) {
+                    if (msg.startsWith("/")) {
+                        MinecraftConsole.info(p.getName() + " issued server command: " + msg);
+                    } else {
+                        MinecraftConsole.info("<" + p.getName() + "> " + msg);
+                    }
                     server.getPluginManager().callEvent(new AsyncPlayerChatEvent(false, p, msg, java.util.Collections.emptySet()));
                 }
             }
@@ -332,7 +344,8 @@ public final class NomeNativeBridge {
 
             byte[] bytes = new byte[(int) payloadLen];
             if (payloadLen > 0 && payloadSeg != null && !payloadSeg.equals(MemorySegment.NULL)) {
-                MemorySegment.copy(payloadSeg, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
+                MemorySegment sized = payloadSeg.reinterpret(payloadLen);
+                MemorySegment.copy(sized, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
             }
 
             // 1. Route to ProtocolLib manager (GrimAC, Vulcan, etc.)
@@ -358,7 +371,8 @@ public final class NomeNativeBridge {
 
             byte[] bytes = new byte[(int) payloadLen];
             if (payloadLen > 0 && payloadSeg != null && !payloadSeg.equals(MemorySegment.NULL)) {
-                MemorySegment.copy(payloadSeg, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
+                MemorySegment sized = payloadSeg.reinterpret(payloadLen);
+                MemorySegment.copy(sized, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
             }
 
             // 1. Route to ProtocolLib manager (RayTraceAntiXray, etc.)

@@ -77,7 +77,6 @@ NomeServerNetwork* nome_net_create(const char *bind_ip, uint16_t port, int worke
     net->tick_clock = 0;
 
     // Generate Spawn Chunk (0, 0) natively using 3D Perlin Noise
-    printf("[Nome-WorldGen] Generating Native 3D Procedural Terrain for Spawn Chunk (0, 0)...\n");
     nome_worldgen_generate_chunk(0, 0, net->spawn_chunk, 1337);
 
     for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
@@ -165,7 +164,6 @@ bool nome_net_start(NomeServerNetwork *net) {
 
     net->listen_fd = fd;
     net->is_running = true;
-    printf("[Nome-Net-C] Native TCP server listening on %s:%u (Non-blocking IOCP/epoll mode)\n", net->bind_ip, net->port);
     return true;
 }
 
@@ -356,8 +354,6 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         send_raw_packet(fd, 0x27, chunk_payload, chunk_len);
         c->pending_chunk_head = 1; // Center sent, rest streams per tick
     }
-
-    printf("[Nome-Net-C] Sent Full Play Sequence (Login, Spawn, SyncPosition, Center 3D Chunk) to '%s'\n", c->username);
 }
 
 static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) {
@@ -672,7 +668,6 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     c->inventory[0] = result_item;
                     c->inventory_count[0] = result_count;
                     nome_net_send_slot(net, (uint64_t)c->socket_fd, 0, 0, result_item, result_count);
-                    printf("[Nome-Crafting-C++] Solved Crafting Grid: produced Item %u x %u\n", result_item, result_count);
                 }
             }
             // Client Information (0x03)
