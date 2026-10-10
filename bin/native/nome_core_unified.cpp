@@ -36,6 +36,7 @@ struct NativeServerState {
     NomeOnPlayerQuitFn java_on_quit{nullptr};
     NomeOnPlayerChatFn java_on_chat{nullptr};
     NomeOnBlockBreakFn java_on_break{nullptr};
+    NomeOnPlayerMoveFn java_on_move{nullptr};
 };
 
 static NativeServerState* g_server = nullptr;
@@ -62,6 +63,13 @@ static void internal_on_block_break(uint64_t player_id, int32_t x, int32_t y, in
     if (g_server && g_server->java_on_break) {
         g_server->java_on_break(player_id, x, y, z);
     }
+}
+
+static bool internal_on_player_move(uint64_t player_id, double from_x, double from_y, double from_z, double to_x, double to_y, double to_z, bool on_ground) {
+    if (g_server && g_server->java_on_move) {
+        return g_server->java_on_move(player_id, from_x, from_y, from_z, to_x, to_y, to_z, on_ground);
+    }
+    return true;
 }
 
 static void native_tick_loop() {
@@ -131,6 +139,7 @@ NOME_EXPORT bool nome_native_init() {
                                internal_on_player_quit,
                                internal_on_player_chat,
                                internal_on_block_break);
+        nome_net_set_move_callback(g_server->network, internal_on_player_move);
     }
     return true;
 }
@@ -169,13 +178,23 @@ NOME_EXPORT void nome_native_stop() {
 NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,
                                               NomeOnPlayerQuitFn on_quit,
                                               NomeOnPlayerChatFn on_chat,
-                                              NomeOnBlockBreakFn on_break) {
+                                              NomeOnBlockBreakFn on_break,
+                                              NomeOnPlayerMoveFn on_move) {
     if (g_server) {
         g_server->java_on_join = on_join;
         g_server->java_on_quit = on_quit;
         g_server->java_on_chat = on_chat;
         g_server->java_on_break = on_break;
+        g_server->java_on_move = on_move;
     }
+}
+
+NOME_EXPORT void nome_native_set_antixray(bool enabled) {
+    nome_worldgen_set_antixray(enabled);
+}
+
+NOME_EXPORT bool nome_native_get_antixray() {
+    return nome_worldgen_get_antixray();
 }
 
 NOME_EXPORT double nome_native_tick_once() {

@@ -1,17 +1,26 @@
 package com.example.testplugin;
 
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.event.Listener;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.EntityType;
+import org.bukkit.inventory.ItemStack;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
+import net.milkbowl.vault.permission.Permission;
 
 public class ExamplePlugin extends JavaPlugin implements Listener {
+
+    private Economy economy;
+    private Permission permission;
 
     @Override
     public void onLoad() {
@@ -52,6 +61,28 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
             }
         }
 
+        // 4. Verify Built-in Vault Economy & Permission Services
+        RegisteredServiceProvider<Economy> ecoRsp = getServer().getServicesManager().getRegistration(Economy.class);
+        if (ecoRsp != null) {
+            economy = ecoRsp.getProvider();
+            getLogger().info("[ExamplePlugin] Hooked into Vault Economy Provider: " + economy.getName());
+            economy.depositPlayer("Steve", 1000.0);
+            getLogger().info("[ExamplePlugin] Steve's Balance after $1000 deposit: " + economy.format(economy.getBalance("Steve")));
+        }
+
+        RegisteredServiceProvider<Permission> permRsp = getServer().getServicesManager().getRegistration(Permission.class);
+        if (permRsp != null) {
+            permission = permRsp.getProvider();
+            getLogger().info("[ExamplePlugin] Hooked into Vault Permission Provider: " + permission.getName());
+            permission.playerAdd("world", "Steve", "nome.admin.fly");
+            boolean hasPerm = permission.playerHas("world", "Steve", "nome.admin.fly");
+            getLogger().info("[ExamplePlugin] Steve has 'nome.admin.fly' permission: " + hasPerm);
+        }
+
+        // 5. Verify Paper/Leaf Native Anti-Xray Engine Mode 1
+        boolean antiXray = Bukkit.isAntiXrayEnabled();
+        getLogger().info("[ExamplePlugin] Native Paper/Leaf Anti-Xray Engine Mode 1 Status: " + (antiXray ? "ACTIVE" : "DISABLED"));
+
         // Schedule a recurring task using BukkitScheduler
         getServer().getScheduler().runTaskTimer(this, () -> {
             // Periodic keepalive / metrics
@@ -67,6 +98,11 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
     public void onPlayerJoin(PlayerJoinEvent event) {
         getLogger().info("[ExamplePlugin] Caught PlayerJoinEvent: " + event.getPlayer().getName());
         event.getPlayer().sendMessage("§a[Nome] Welcome " + event.getPlayer().getName() + " to the 100% Native C/C++/Rust Minecraft Server!");
+
+        // Equip Diamond Sword in player inventory
+        ItemStack diamondSword = new ItemStack(Material.DIAMOND_SWORD, 1);
+        event.getPlayer().getInventory().setItemInMainHand(diamondSword);
+        getLogger().info("[ExamplePlugin] Equipped Diamond Sword in player hand: " + event.getPlayer().getItemInHand().getType());
     }
 
     @EventHandler
@@ -74,5 +110,15 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
         Material type = event.getBlock().getType();
         getLogger().info("[ExamplePlugin] Caught BlockBreakEvent: " + event.getPlayer().getName() +
                 " broke " + type + " at (" + event.getBlock().getX() + ", " + event.getBlock().getY() + ", " + event.getBlock().getZ() + ")");
+    }
+
+    @EventHandler
+    public void onPlayerMove(PlayerMoveEvent event) {
+        // Anticheat Simulation: If player teleports or moves illegally (e.g. speedhack check)
+        Location to = event.getTo();
+        if (to != null && to.getY() > 300.0) {
+            getLogger().warning("[Anticheat] Flagged Illegal Fly/Speed for " + event.getPlayer().getName() + " at Y=" + to.getY() + "! Cancelling movement (Rubberband setback).");
+            event.setCancelled(true);
+        }
     }
 }

@@ -7,6 +7,7 @@ import java.util.logging.Logger;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.scheduler.BukkitScheduler;
 import io.nome.bridge.NomeNativeBridge;
 
@@ -36,7 +37,11 @@ public final class Bukkit {
     public static boolean broadcastMessage(String message) { return server.broadcastMessage(message); }
     public static Player getPlayer(String name) { return server.getPlayer(name); }
     public static Player getPlayer(UUID id) { return server.getPlayer(id); }
+    public static OfflinePlayer getOfflinePlayer(String name) { return server.getOfflinePlayer(name); }
+    public static OfflinePlayer getOfflinePlayer(UUID id) { return server.getOfflinePlayer(id); }
+    public static OfflinePlayer[] getOfflinePlayers() { return server.getOfflinePlayers(); }
     public static PluginManager getPluginManager() { return server.getPluginManager(); }
+    public static ServicesManager getServicesManager() { return server.getServicesManager(); }
     public static BukkitScheduler getScheduler() { return server.getScheduler(); }
     public static List<World> getWorlds() { return server.getWorlds(); }
     public static World getWorld(String name) { return server.getWorld(name); }
@@ -47,6 +52,10 @@ public final class Bukkit {
     public static void shutdown() { server.shutdown(); }
     public static double[] getTPS() { return server.getTPS(); }
     public static double getMSPT() { return server.getMSPT(); }
+
+    // Anti-Xray Engine Mode 1
+    public static void setAntiXrayEnabled(boolean enabled) { server.setAntiXrayEnabled(enabled); }
+    public static boolean isAntiXrayEnabled() { return server.isAntiXrayEnabled(); }
 
     // 100% Native C++ Crafting Engine Access for Java Plugins
     public static boolean craft2x2(short in0, short in1, short in2, short in3, short[] outResult) {

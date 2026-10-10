@@ -69,6 +69,11 @@ typedef struct NomeClientSession {
     int gamemode;
     uint16_t inventory[46];
     uint8_t inventory_count[46];
+    bool on_ground;
+    bool is_sneaking;
+    bool is_sprinting;
+    bool is_flying;
+    float fall_distance;
     uint64_t last_keepalive_sent;
     uint8_t rx_buf[8192];
     size_t rx_len;
@@ -88,6 +93,8 @@ typedef void (*NomeOnPlayerJoinFn)(uint64_t player_id, const char *username);
 typedef void (*NomeOnPlayerQuitFn)(uint64_t player_id);
 typedef void (*NomeOnPlayerChatFn)(uint64_t player_id, const char *message);
 typedef void (*NomeOnBlockBreakFn)(uint64_t player_id, int32_t x, int32_t y, int32_t z);
+typedef bool (*NomeOnPlayerMoveFn)(uint64_t player_id, double from_x, double from_y, double from_z, double to_x, double to_y, double to_z, bool on_ground);
+typedef void (*NomeOnPlayerInteractFn)(uint64_t player_id, int32_t x, int32_t y, int32_t z, int32_t action);
 
 NOME_API NomeServerNetwork* nome_net_create(const char *bind_ip, uint16_t port, int worker_threads);
 NOME_API bool nome_net_start(NomeServerNetwork *net);
@@ -100,6 +107,8 @@ NOME_API void nome_net_set_callbacks(NomeServerNetwork *net,
                                      NomeOnPlayerQuitFn on_quit,
                                      NomeOnPlayerChatFn on_chat,
                                      NomeOnBlockBreakFn on_break);
+NOME_API void nome_net_set_move_callback(NomeServerNetwork *net, NomeOnPlayerMoveFn on_move);
+NOME_API void nome_net_set_interact_callback(NomeServerNetwork *net, NomeOnPlayerInteractFn on_interact);
 
 NOME_API void nome_net_broadcast_chat(NomeServerNetwork *net, const char *message);
 NOME_API void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x, double y, double z, float yaw, float pitch);

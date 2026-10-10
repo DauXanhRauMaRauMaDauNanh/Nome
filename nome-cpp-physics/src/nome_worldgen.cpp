@@ -634,6 +634,28 @@ static void write_be64(uint8_t* dst, uint64_t val) {
     }
 }
 
+static bool g_antixray_enabled = true;
+
+using namespace nome;
+
+static inline bool is_valuable_ore(uint16_t b) {
+    return (b == BLOCK_DIAMOND_ORE || b == BLOCK_DEEPSLATE_DIAMOND_ORE ||
+            b == BLOCK_GOLD_ORE || b == BLOCK_DEEPSLATE_GOLD_ORE ||
+            b == BLOCK_IRON_ORE || b == BLOCK_DEEPSLATE_IRON_ORE ||
+            b == BLOCK_COAL_ORE || b == BLOCK_DEEPSLATE_COAL_ORE ||
+            b == BLOCK_LAPIS_ORE || b == BLOCK_DEEPSLATE_LAPIS_ORE ||
+            b == BLOCK_REDSTONE_ORE || b == BLOCK_DEEPSLATE_REDSTONE_ORE ||
+            b == BLOCK_EMERALD_ORE || b == BLOCK_DEEPSLATE_EMERALD_ORE ||
+            b == BLOCK_COPPER_ORE || b == BLOCK_DEEPSLATE_COPPER_ORE ||
+            b == BLOCK_CHEST);
+}
+
+static inline bool is_occluding_solid(uint16_t b) {
+    return b != BLOCK_AIR && b != BLOCK_WATER && b != BLOCK_LAVA && 
+           b != BLOCK_TORCH && b != BLOCK_COBWEB && b != BLOCK_GLASS &&
+           b != BLOCK_RED_SHRUB && b != BLOCK_SHELF_MUSHROOM;
+}
+
 size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf) {
     if (!blocks || !out_buf || max_buf < 65536) return 0;
     
@@ -660,8 +682,26 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
         for (int y = 0; y < 16; y++) {
             for (int z = 0; z < 16; z++) {
                 for (int x = 0; x < 16; x++) {
-                    int global_idx = ((base_y + y) * 256) + (z * 16) + x;
+                    int gy = base_y + y;
+                    int global_idx = (gy * 256) + (z * 16) + x;
                     uint16_t b = blocks[global_idx];
+
+                    // Native Paper/Leaf Anti-Xray Engine Mode 1: Obfuscate occluded ores
+                    if (g_antixray_enabled && is_valuable_ore(b)) {
+                        bool fully_hidden = true;
+                        if (x > 0 && !is_occluding_solid(blocks[gy * 256 + z * 16 + (x - 1)])) fully_hidden = false;
+                        if (x < 15 && !is_occluding_solid(blocks[gy * 256 + z * 16 + (x + 1)])) fully_hidden = false;
+                        if (z > 0 && !is_occluding_solid(blocks[gy * 256 + (z - 1) * 16 + x])) fully_hidden = false;
+                        if (z < 15 && !is_occluding_solid(blocks[gy * 256 + (z + 1) * 16 + x])) fully_hidden = false;
+                        if (gy > 0 && !is_occluding_solid(blocks[(gy - 1) * 256 + z * 16 + x])) fully_hidden = false;
+                        if (gy < 383 && !is_occluding_solid(blocks[(gy + 1) * 256 + z * 16 + x])) fully_hidden = false;
+
+                        if (fully_hidden) {
+                            // Mask as Deepslate or Stone over the wire (0% GC overhead)
+                            b = (gy < 64) ? nome::BLOCK_DEEPSLATE : nome::BLOCK_STONE;
+                        }
+                    }
+
                     int local_idx = (y * 16 + z) * 16 + x;
                     sec_blocks[local_idx] = b;
                     if (b != 0) non_air++;
@@ -781,6 +821,14 @@ bool nome_worldgen_locate_structure(const char* structure_name, int origin_chunk
         }
     }
     return false;
+}
+
+void nome_worldgen_set_antixray(bool enabled) {
+    g_antixray_enabled = enabled;
+}
+
+bool nome_worldgen_get_antixray() {
+    return g_antixray_enabled;
 }
 
 }

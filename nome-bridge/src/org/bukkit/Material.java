@@ -41,6 +41,9 @@ public enum Material {
     GLOWSTONE(89),
     STONE_BRICKS(98),
     OBSIDIAN(49),
+    DEEPSLATE(100),
+    COPPER_ORE(110),
+    EMERALD_ORE(129),
     EMERALD_BLOCK(133),
     BEACON(138),
     ANVIL(145),
@@ -73,7 +76,35 @@ public enum Material {
     SHULKER_BOX(219),
     NETHERITE_BLOCK(1000),
     ANCIENT_DEBRIS(1001),
-    COPPER_BLOCK(1002);
+    COPPER_BLOCK(1002),
+    DEEPSLATE_DIAMOND_ORE(200),
+    DEEPSLATE_GOLD_ORE(201),
+    DEEPSLATE_IRON_ORE(202),
+    DEEPSLATE_COPPER_ORE(203),
+    DEEPSLATE_COAL_ORE(204),
+    DEEPSLATE_LAPIS_ORE(205),
+    DEEPSLATE_REDSTONE_ORE(206),
+    DEEPSLATE_EMERALD_ORE(208),
+
+    // Items, Weapons, Tools
+    APPLE(260),
+    BOW(261),
+    ARROW(262),
+    DIAMOND(264),
+    IRON_INGOT(265),
+    GOLD_INGOT(266),
+    IRON_SWORD(267),
+    WOODEN_SWORD(268),
+    WOODEN_PICKAXE(270),
+    STONE_SWORD(272),
+    DIAMOND_SWORD(276),
+    DIAMOND_PICKAXE(278),
+    STICK(280),
+    GOLDEN_SWORD(283),
+    BREAD(297),
+    COOKED_BEEF(364),
+    EMERALD(388),
+    NETHERITE_SWORD(1003);
 
     private final int id;
 
@@ -86,7 +117,11 @@ public enum Material {
     }
 
     public boolean isBlock() {
-        return true;
+        return id < 256;
+    }
+
+    public boolean isItem() {
+        return id >= 256;
     }
 
     public static Material getMaterial(String name) {

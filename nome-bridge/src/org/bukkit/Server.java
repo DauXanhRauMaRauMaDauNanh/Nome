@@ -9,6 +9,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.scheduler.BukkitScheduler;
 
 public interface Server {
@@ -24,7 +25,11 @@ public interface Server {
     boolean broadcastMessage(String message);
     Player getPlayer(String name);
     Player getPlayer(UUID id);
+    OfflinePlayer getOfflinePlayer(String name);
+    OfflinePlayer getOfflinePlayer(UUID id);
+    OfflinePlayer[] getOfflinePlayers();
     PluginManager getPluginManager();
+    ServicesManager getServicesManager();
     BukkitScheduler getScheduler();
     List<World> getWorlds();
     World getWorld(String name);
@@ -35,4 +40,8 @@ public interface Server {
     void shutdown();
     double[] getTPS();
     double getMSPT();
+
+    // Anti-Xray Control (Paper/Leaf Engine Mode 1)
+    void setAntiXrayEnabled(boolean enabled);
+    boolean isAntiXrayEnabled();
 }

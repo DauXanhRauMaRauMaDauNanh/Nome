@@ -2,8 +2,20 @@ package io.nome.bridge;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.UUID;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 /**
  * NomeNativeBridge binds the Java Runtime to the Native C/C++/Rust Core
@@ -36,6 +48,9 @@ public final class NomeNativeBridge {
     private static MethodHandle hEntityGetHealth;
     private static MethodHandle hEntityDamage;
     private static MethodHandle hLocateStructure;
+    private static MethodHandle hSetAntiXray;
+    private static MethodHandle hGetAntiXray;
+    private static MethodHandle hRegisterCallbacks;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -119,6 +134,18 @@ public final class NomeNativeBridge {
             hLocateStructure = linker.downcallHandle(lookup.find("nome_native_locate_structure").orElseThrow(),
                     FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 
+            hSetAntiXray = linker.downcallHandle(lookup.find("nome_native_set_antixray").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_BOOLEAN));
+
+            hGetAntiXray = linker.downcallHandle(lookup.find("nome_native_get_antixray").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN));
+
+            // Register Java EventBridge Upcalls into C++ Engine
+            hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+
+            registerUpcalls(linker);
+
             initialized = true;
             System.out.println("[Nome-Bridge] Native engine symbols bound successfully via Project Panama FFM.");
             return true;
@@ -128,6 +155,140 @@ public final class NomeNativeBridge {
             return false;
         }
     }
+
+    private static void registerUpcalls(Linker linker) {
+        try {
+            MethodHandles.Lookup lk = MethodHandles.lookup();
+
+            MethodHandle mhJoin = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnJoin",
+                    MethodType.methodType(void.class, long.class, MemorySegment.class));
+            MemorySegment stubJoin = linker.upcallStub(mhJoin,
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), Arena.global());
+
+            MethodHandle mhQuit = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnQuit",
+                    MethodType.methodType(void.class, long.class));
+            MemorySegment stubQuit = linker.upcallStub(mhQuit,
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG), Arena.global());
+
+            MethodHandle mhChat = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnChat",
+                    MethodType.methodType(void.class, long.class, MemorySegment.class));
+            MemorySegment stubChat = linker.upcallStub(mhChat,
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), Arena.global());
+
+            MethodHandle mhBreak = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnBlockBreak",
+                    MethodType.methodType(void.class, long.class, int.class, int.class, int.class));
+            MemorySegment stubBreak = linker.upcallStub(mhBreak,
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT), Arena.global());
+
+            MethodHandle mhMove = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnPlayerMove",
+                    MethodType.methodType(boolean.class, long.class, double.class, double.class, double.class, double.class, double.class, double.class, boolean.class));
+            MemorySegment stubMove = linker.upcallStub(mhMove,
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_BOOLEAN), Arena.global());
+
+            hRegisterCallbacks.invokeExact(stubJoin, stubQuit, stubChat, stubBreak, stubMove);
+            System.out.println("[Nome-Bridge] Project Panama zero-overhead Upcall Stubs registered into Native Engine.");
+        } catch (Throwable t) {
+            System.err.println("[Nome-Bridge] Warning: Failed to register native upcall callbacks: " + t.getMessage());
+        }
+    }
+
+    // ==========================================
+    // Panama FFM Native -> Java Upcall Handlers
+    // ==========================================
+
+    public static void nativeCallbackOnJoin(long playerId, MemorySegment usernameSeg) {
+        try {
+            String username = usernameSeg.getString(0);
+            NomeServer server = NomeServer.getInstance();
+            if (server != null) {
+                World w = server.getWorlds().isEmpty() ? null : server.getWorlds().get(0);
+                Player p = new Player((int) playerId, username, UUID.randomUUID(), w, new Location(w, 0.5, 64.0, 0.5), server);
+                server.registerPlayer(p);
+                server.getPluginManager().callEvent(new PlayerJoinEvent(p, "§e" + username + " joined the game"));
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void nativeCallbackOnQuit(long playerId) {
+        try {
+            NomeServer server = NomeServer.getInstance();
+            if (server != null) {
+                Player p = server.getPlayerById((int) playerId);
+                if (p != null) {
+                    server.getPluginManager().callEvent(new PlayerQuitEvent(p, "§e" + p.getName() + " left the game"));
+                    server.unregisterPlayer(p);
+                }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void nativeCallbackOnChat(long playerId, MemorySegment msgSeg) {
+        try {
+            String msg = msgSeg.getString(0);
+            NomeServer server = NomeServer.getInstance();
+            if (server != null) {
+                Player p = server.getPlayerById((int) playerId);
+                if (p != null) {
+                    server.getPluginManager().callEvent(new AsyncPlayerChatEvent(false, p, msg, java.util.Collections.emptySet()));
+                }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void nativeCallbackOnBlockBreak(long playerId, int x, int y, int z) {
+        try {
+            NomeServer server = NomeServer.getInstance();
+            if (server != null) {
+                Player p = server.getPlayerById((int) playerId);
+                World w = p != null ? p.getWorld() : (server.getWorlds().isEmpty() ? null : server.getWorlds().get(0));
+                if (w != null) {
+                    BlockBreakEvent event = new BlockBreakEvent(w.getBlockAt(x, y, z), p);
+                    server.getPluginManager().callEvent(event);
+                }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static boolean nativeCallbackOnPlayerMove(long playerId, double fx, double fy, double fz, double tx, double ty, double tz, boolean onGround) {
+        try {
+            NomeServer server = NomeServer.getInstance();
+            if (server == null) return true;
+            Player p = server.getPlayerById((int) playerId);
+            if (p == null) return true;
+
+            World w = p.getWorld();
+            Location from = new Location(w, fx, fy, fz);
+            Location to = new Location(w, tx, ty, tz);
+
+            PlayerMoveEvent event = new PlayerMoveEvent(p, from, to);
+            server.getPluginManager().callEvent(event);
+
+            p.setOnGround(onGround);
+
+            if (event.isCancelled()) {
+                // Anticheat cancelled movement: Native C++ will rollback / setback the player!
+                return false;
+            }
+
+            p.setLocationInternal(to);
+            return true;
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return true;
+        }
+    }
+
+    // ==========================================
+    // Java -> Native Engine Downcall Wrappers
+    // ==========================================
 
     public static boolean init() {
         if (!initialized) return false;
@@ -240,6 +401,24 @@ public final class NomeNativeBridge {
         }
     }
 
+    public static void setAntiXray(boolean enabled) {
+        if (!initialized) return;
+        try {
+            hSetAntiXray.invokeExact(enabled);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static boolean isAntiXray() {
+        if (!initialized) return false;
+        try {
+            return (boolean) hGetAntiXray.invokeExact();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public static boolean craft2x2(short in0, short in1, short in2, short in3, short[] outResult) {
         if (!initialized || outResult == null || outResult.length < 2) return false;
         try (Arena arena = Arena.ofConfined()) {
@@ -276,7 +455,6 @@ public final class NomeNativeBridge {
         }
     }
 
-    // 100% Native Entity ECS Downcalls
     public static int spawnEntity(short type, double x, double y, double z) {
         if (!initialized) return -1;
         try {

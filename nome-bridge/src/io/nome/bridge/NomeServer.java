@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
@@ -14,9 +15,16 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicePriority;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.SimplePluginManager;
+import org.bukkit.plugin.SimpleServicesManager;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.SimpleScheduler;
+import io.nome.bridge.vault.NomeEconomy;
+import io.nome.bridge.vault.NomePermission;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.permission.Permission;
 
 public class NomeServer implements Server {
 
@@ -27,9 +35,12 @@ public class NomeServer implements Server {
     private final String bukkitVersion = "1.21.4-R0.1-SNAPSHOT";
     private final Logger logger = Logger.getLogger("Minecraft");
     private final SimplePluginManager pluginManager;
+    private final SimpleServicesManager servicesManager;
     private final SimpleScheduler scheduler;
     private final Map<String, World> worlds = new ConcurrentHashMap<>();
     private final Map<UUID, Player> players = new ConcurrentHashMap<>();
+    private final Map<Integer, Player> playersById = new ConcurrentHashMap<>();
+    private final Map<String, OfflinePlayer> offlinePlayers = new ConcurrentHashMap<>();
     private boolean isRunning = false;
 
     public NomeServer() {
@@ -37,15 +48,54 @@ public class NomeServer implements Server {
         Bukkit.setServer(this);
 
         this.pluginManager = new SimplePluginManager(this, new File("plugins"));
+        this.servicesManager = new SimpleServicesManager();
         this.scheduler = new SimpleScheduler();
 
         // Initialize default worlds
         World overworld = new World("world");
         worlds.put("world", overworld);
+
+        // Register built-in Vault Economy & Permission providers
+        registerBuiltinServices();
+    }
+
+    private void registerBuiltinServices() {
+        try {
+            NomeEconomy economy = new NomeEconomy();
+            servicesManager.register(Economy.class, economy, null, ServicePriority.Normal);
+            System.out.println("[Nome-Vault] Registered native built-in Economy provider: " + economy.getName());
+
+            NomePermission permission = new NomePermission();
+            servicesManager.register(Permission.class, permission, null, ServicePriority.Normal);
+            System.out.println("[Nome-Vault] Registered native built-in Permission provider: " + permission.getName());
+        } catch (Throwable t) {
+            System.err.println("[Nome-Vault] Note: Service registration note: " + t.getMessage());
+        }
     }
 
     public static NomeServer getInstance() {
         return instance;
+    }
+
+    public void registerPlayer(Player player) {
+        if (player == null) return;
+        players.put(player.getUniqueId(), player);
+        playersById.put(player.getEntityId(), player);
+        offlinePlayers.put(player.getName().toLowerCase(), player);
+        World w = player.getWorld();
+        if (w != null) w.addPlayer(player);
+    }
+
+    public void unregisterPlayer(Player player) {
+        if (player == null) return;
+        players.remove(player.getUniqueId());
+        playersById.remove(player.getEntityId());
+        World w = player.getWorld();
+        if (w != null) w.removePlayer(player);
+    }
+
+    public Player getPlayerById(int id) {
+        return playersById.get(id);
     }
 
     public void start() {
@@ -75,8 +125,7 @@ public class NomeServer implements Server {
         World overworld = worlds.get("world");
         Location spawnLoc = new Location(overworld, 0.5, 64.0, 0.5);
         Player steve = new Player(1, "Steve", UUID.randomUUID(), overworld, spawnLoc, this);
-        players.put(steve.getUniqueId(), steve);
-        overworld.addPlayer(steve);
+        registerPlayer(steve);
 
         System.out.println("[Nome] [Native->Plugin EventBridge] Emitting PlayerJoinEvent...");
         pluginManager.callEvent(new PlayerJoinEvent(steve, "§e" + steve.getName() + " joined the game"));
@@ -85,6 +134,7 @@ public class NomeServer implements Server {
         pluginManager.callEvent(new BlockBreakEvent(overworld.getBlockAt(0, 64, 0), steve));
 
         System.out.println("[Nome] Server ready! Native engine ticking at 20 TPS on port 25565.");
+        System.out.println("[Nome] Native Anti-Xray Engine Mode 1: " + (isAntiXrayEnabled() ? "ENABLED" : "DISABLED"));
     }
 
     public void tick() {
@@ -130,7 +180,33 @@ public class NomeServer implements Server {
     }
 
     @Override public Player getPlayer(UUID id) { return players.get(id); }
+
+    @Override
+    public OfflinePlayer getOfflinePlayer(String name) {
+        if (name == null) return null;
+        Player online = getPlayer(name);
+        if (online != null) return online;
+        return offlinePlayers.get(name.toLowerCase());
+    }
+
+    @Override
+    public OfflinePlayer getOfflinePlayer(UUID id) {
+        if (id == null) return null;
+        Player online = players.get(id);
+        if (online != null) return online;
+        for (OfflinePlayer p : offlinePlayers.values()) {
+            if (p.getUniqueId().equals(id)) return p;
+        }
+        return null;
+    }
+
+    @Override
+    public OfflinePlayer[] getOfflinePlayers() {
+        return offlinePlayers.values().toArray(new OfflinePlayer[0]);
+    }
+
     @Override public PluginManager getPluginManager() { return pluginManager; }
+    @Override public ServicesManager getServicesManager() { return servicesManager; }
     @Override public BukkitScheduler getScheduler() { return scheduler; }
     @Override public List<World> getWorlds() { return new ArrayList<>(worlds.values()); }
     @Override public World getWorld(String name) { return worlds.get(name); }
@@ -164,5 +240,15 @@ public class NomeServer implements Server {
     @Override
     public double getMSPT() {
         return NomeNativeBridge.getMspt();
+    }
+
+    @Override
+    public void setAntiXrayEnabled(boolean enabled) {
+        NomeNativeBridge.setAntiXray(enabled);
+    }
+
+    @Override
+    public boolean isAntiXrayEnabled() {
+        return NomeNativeBridge.isAntiXray();
     }
 }

@@ -40,6 +40,8 @@ struct NomeServerNetwork {
     NomeOnPlayerQuitFn on_quit;
     NomeOnPlayerChatFn on_chat;
     NomeOnBlockBreakFn on_break;
+    NomeOnPlayerMoveFn on_move;
+    NomeOnPlayerInteractFn on_interact;
 
     // Master Spawn Chunk Column (16x16x384 voxels)
     uint16_t spawn_chunk[16 * 16 * 384];
@@ -81,6 +83,7 @@ NomeServerNetwork* nome_net_create(const char *bind_ip, uint16_t port, int worke
         net->clients[i].x = 0.5;
         net->clients[i].y = 65.0;
         net->clients[i].z = 0.5;
+        net->clients[i].on_ground = true;
     }
 
     return net;
@@ -96,6 +99,14 @@ void nome_net_set_callbacks(NomeServerNetwork *net,
     net->on_quit = on_quit;
     net->on_chat = on_chat;
     net->on_break = on_break;
+}
+
+void nome_net_set_move_callback(NomeServerNetwork *net, NomeOnPlayerMoveFn on_move) {
+    if (net) net->on_move = on_move;
+}
+
+void nome_net_set_interact_callback(NomeServerNetwork *net, NomeOnPlayerInteractFn on_interact) {
+    if (net) net->on_interact = on_interact;
 }
 
 bool nome_net_start(NomeServerNetwork *net) {
@@ -363,16 +374,60 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
             }
             // Player Position / Position & Rotation (0x14, 0x16, 0x17, 0x18)
             else if (packet_id == 0x14 || packet_id == 0x16 || packet_id == 0x17 || packet_id == 0x18) {
-                if (payload_len >= 24) {
-                    uint64_t raw_x = 0, raw_y = 0, raw_z = 0;
-                    for (int b = 0; b < 8; b++) {
-                        raw_x = (raw_x << 8) | payload[b];
-                        raw_y = (raw_y << 8) | payload[8 + b];
-                        raw_z = (raw_z << 8) | payload[16 + b];
-                    }
-                    memcpy(&c->x, &raw_x, 8);
-                    memcpy(&c->y, &raw_y, 8);
-                    memcpy(&c->z, &raw_z, 8);
+                double new_x = c->x, new_y = c->y, new_z = c->z;
+                float new_yaw = c->yaw, new_pitch = c->pitch;
+                bool on_ground = c->on_ground;
+
+                if (packet_id == 0x14 && payload_len >= 24) { // Pos
+                    uint64_t rx = 0, ry = 0, rz = 0;
+                    for (int b = 0; b < 8; b++) rx = (rx << 8) | payload[b];
+                    for (int b = 0; b < 8; b++) ry = (ry << 8) | payload[8 + b];
+                    for (int b = 0; b < 8; b++) rz = (rz << 8) | payload[16 + b];
+                    memcpy(&new_x, &rx, 8);
+                    memcpy(&new_y, &ry, 8);
+                    memcpy(&new_z, &rz, 8);
+                    if (payload_len >= 25) on_ground = (payload[24] != 0);
+                } else if (packet_id == 0x16 && payload_len >= 32) { // Pos + Rot
+                    uint64_t rx = 0, ry = 0, rz = 0;
+                    for (int b = 0; b < 8; b++) rx = (rx << 8) | payload[b];
+                    for (int b = 0; b < 8; b++) ry = (ry << 8) | payload[8 + b];
+                    for (int b = 0; b < 8; b++) rz = (rz << 8) | payload[16 + b];
+                    memcpy(&new_x, &rx, 8);
+                    memcpy(&new_y, &ry, 8);
+                    memcpy(&new_z, &rz, 8);
+                    uint32_t ryaw = 0, rpitch = 0;
+                    for (int b = 0; b < 4; b++) ryaw = (ryaw << 8) | payload[24 + b];
+                    for (int b = 0; b < 4; b++) rpitch = (rpitch << 8) | payload[28 + b];
+                    memcpy(&new_yaw, &ryaw, 4);
+                    memcpy(&new_pitch, &rpitch, 4);
+                    if (payload_len >= 33) on_ground = (payload[32] != 0);
+                } else if (packet_id == 0x17 && payload_len >= 8) { // Rot
+                    uint32_t ryaw = 0, rpitch = 0;
+                    for (int b = 0; b < 4; b++) ryaw = (ryaw << 8) | payload[b];
+                    for (int b = 0; b < 4; b++) rpitch = (rpitch << 8) | payload[4 + b];
+                    memcpy(&new_yaw, &ryaw, 4);
+                    memcpy(&new_pitch, &rpitch, 4);
+                    if (payload_len >= 9) on_ground = (payload[8] != 0);
+                } else if (packet_id == 0x18 && payload_len >= 1) { // OnGround only
+                    on_ground = (payload[0] != 0);
+                }
+
+                // Anticheat validation hook (Java PlayerMoveEvent)
+                bool allow_move = true;
+                if (net->on_move && (new_x != c->x || new_y != c->y || new_z != c->z)) {
+                    allow_move = net->on_move((uint64_t)c->socket_fd, c->x, c->y, c->z, new_x, new_y, new_z, on_ground);
+                }
+
+                if (!allow_move) {
+                    // Rubberband setback: Anticheat cancelled the movement!
+                    nome_net_send_teleport(net, (uint64_t)c->socket_fd, c->x, c->y, c->z, c->yaw, c->pitch);
+                } else {
+                    c->x = new_x;
+                    c->y = new_y;
+                    c->z = new_z;
+                    c->yaw = new_yaw;
+                    c->pitch = new_pitch;
+                    c->on_ground = on_ground;
                 }
             }
             // Player Action / Digging / Block Break (0x1E / 0x24)
@@ -393,6 +448,22 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                             net->spawn_chunk[idx] = 0;
                         }
                         nome_net_send_block_change(net, bx, by, bz, 0);
+
+                        // Native Anti-Xray Engine Mode 1: Reveal 6 orthogonal neighbor ores
+                        static const int adx[6] = {1, -1, 0, 0, 0, 0};
+                        static const int ady[6] = {0, 0, 1, -1, 0, 0};
+                        static const int adz[6] = {0, 0, 0, 0, 1, -1};
+                        for (int n = 0; n < 6; n++) {
+                            int nx = bx + adx[n], ny = by + ady[n], nz = bz + adz[n];
+                            if (ny >= -64 && ny < 320 && nx >= 0 && nx < 16 && nz >= 0 && nz < 16) {
+                                int nidx = ((ny + 64) * 256) + (nz * 16) + nx;
+                                uint16_t nb = net->spawn_chunk[nidx];
+                                if (nb != 0) {
+                                    nome_net_send_block_change(net, nx, ny, nz, nb);
+                                }
+                            }
+                        }
+
                         if (net->on_break) {
                             net->on_break((uint64_t)c->socket_fd, bx, by, bz);
                         }

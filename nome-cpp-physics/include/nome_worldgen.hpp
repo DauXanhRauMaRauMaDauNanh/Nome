@@ -144,6 +144,8 @@ extern "C" {
 NOME_WORLDGEN_API void nome_worldgen_generate_chunk(int chunk_x, int chunk_z, uint16_t* out_blocks, int64_t seed);
 NOME_WORLDGEN_API size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf);
 NOME_WORLDGEN_API bool nome_worldgen_locate_structure(const char* structure_name, int origin_chunk_x, int origin_chunk_z, int* out_chunk_x, int* out_chunk_z, int64_t seed);
+NOME_WORLDGEN_API void nome_worldgen_set_antixray(bool enabled);
+NOME_WORLDGEN_API bool nome_worldgen_get_antixray();
 
 #ifdef __cplusplus
 }
