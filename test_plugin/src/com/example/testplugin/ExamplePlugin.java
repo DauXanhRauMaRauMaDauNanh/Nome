@@ -9,13 +9,19 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
+import org.bukkit.ChunkSnapshot;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.entity.EntityType;
 import org.bukkit.inventory.ItemStack;
 import net.milkbowl.vault.economy.Economy;
-import net.milkbowl.vault.economy.EconomyResponse;
 import net.milkbowl.vault.permission.Permission;
+import com.comphenix.protocol.ProtocolLibrary;
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketEvent;
 
 public class ExamplePlugin extends JavaPlugin implements Listener {
 
@@ -48,20 +54,49 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
             getLogger().info("[ExamplePlugin] Native C++ 3x3 Crafting Verified: 3 Planks + 2 Sticks -> Item " + res3x3[0] + " x" + res3x3[1] + " (Wooden Pickaxe)");
         }
 
-        // 2. Verify Native C++ Entity Spawning into Native ECS
-        if (getServer().getWorld("world") != null) {
-            Location spawnLoc = new Location(getServer().getWorld("world"), 10.5, 65.0, 10.5);
-            int entityId = getServer().getWorld("world").spawnEntity(spawnLoc, EntityType.ZOMBIE);
+        // 2. Verify Smart Chunk Manager & WorldGen API
+        World world = getServer().getWorld("world");
+        if (world != null) {
+            Chunk spawnChunk = world.getChunkAt(0, 0);
+            getLogger().info("[ExamplePlugin] Smart Chunk (0, 0) loaded: " + spawnChunk.isLoaded());
+
+            ChunkSnapshot snapshot = spawnChunk.getChunkSnapshot();
+            getLogger().info("[ExamplePlugin] ChunkSnapshot (0, 0) Highest Block at (8, 8): Y=" + snapshot.getHighestBlockYAt(8, 8));
+
+            // Test asynchronous multi-chunk load
+            world.loadChunk(1, 1, true);
+            getLogger().info("[ExamplePlugin] Asynchronously Loaded Adjacent Chunk (1, 1): " + world.isChunkLoaded(1, 1));
+            getLogger().info("[ExamplePlugin] Total Active World Chunks: " + world.getLoadedChunks().length);
+
+            // 3. Verify Native C++ Entity Spawning into Native ECS
+            Location spawnLoc = new Location(world, 10.5, 65.0, 10.5);
+            int entityId = world.spawnEntity(spawnLoc, EntityType.ZOMBIE);
             getLogger().info("[ExamplePlugin] Native Entity Spawned in C++ ECS: Zombie ID #" + entityId);
 
-            // 3. Verify Native Structure Locator
-            Location villageLoc = getServer().getWorld("world").locateNearestStructure("village", spawnLoc);
+            Location villageLoc = world.locateNearestStructure("village", spawnLoc);
             if (villageLoc != null) {
                 getLogger().info("[ExamplePlugin] Located Procedural Village at: (" + villageLoc.getBlockX() + ", " + villageLoc.getBlockZ() + ")");
             }
         }
 
-        // 4. Verify Built-in Vault Economy & Permission Services
+        // 4. Verify ProtocolLib Compatibility (Universal Packet Interception Layer for 3rd-Party Anticheat & Anti-Xray)
+        ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.POSITION,
+                PacketType.Play.Client.FLYING,
+                PacketType.Play.Server.MAP_CHUNK) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                // Intercept incoming packets for Anticheat (GrimAC, Vulcan, etc.)
+            }
+
+            @Override
+            public void onPacketSending(PacketEvent event) {
+                // Intercept outgoing packets for Anti-Xray / Obfuscators
+            }
+        });
+        getLogger().info("[ExamplePlugin] Hooked ProtocolLib ProtocolManager packet interception pipeline!");
+
+        // 5. Verify Built-in Vault Economy & Permission Services
         RegisteredServiceProvider<Economy> ecoRsp = getServer().getServicesManager().getRegistration(Economy.class);
         if (ecoRsp != null) {
             economy = ecoRsp.getProvider();
@@ -79,13 +114,13 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
             getLogger().info("[ExamplePlugin] Steve has 'nome.admin.fly' permission: " + hasPerm);
         }
 
-        // 5. Verify Paper/Leaf Native Anti-Xray Engine Mode 1
+        // 6. Verify Paper/Leaf Native Anti-Xray Engine Mode 1
         boolean antiXray = Bukkit.isAntiXrayEnabled();
         getLogger().info("[ExamplePlugin] Native Paper/Leaf Anti-Xray Engine Mode 1 Status: " + (antiXray ? "ACTIVE" : "DISABLED"));
 
-        // Schedule a recurring task using BukkitScheduler
+        // Schedule recurring task
         getServer().getScheduler().runTaskTimer(this, () -> {
-            // Periodic keepalive / metrics
+            // Periodic keepalive
         }, 20, 20);
     }
 
@@ -114,7 +149,6 @@ public class ExamplePlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerMove(PlayerMoveEvent event) {
-        // Anticheat Simulation: If player teleports or moves illegally (e.g. speedhack check)
         Location to = event.getTo();
         if (to != null && to.getY() > 300.0) {
             getLogger().warning("[Anticheat] Flagged Illegal Fly/Speed for " + event.getPlayer().getName() + " at Y=" + to.getY() + "! Cancelling movement (Rubberband setback).");

@@ -12,15 +12,14 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.*;
+import com.comphenix.protocol.ProtocolLibrary;
 
 /**
  * NomeNativeBridge binds the Java Runtime to the Native C/C++/Rust Core
  * using modern Java 22/25 Project Panama Foreign Function & Memory (FFM) API.
- * All state, worldgen, entities, structures, crafting, networking, and ticking live 100% in Native C/C++.
+ * All state, worldgen, smart chunk manager, entity ECS, crafting, and networking
+ * live 100% in Native C/C++ with zero Java tick overhead.
  */
 public final class NomeNativeBridge {
 
@@ -51,6 +50,14 @@ public final class NomeNativeBridge {
     private static MethodHandle hSetAntiXray;
     private static MethodHandle hGetAntiXray;
     private static MethodHandle hRegisterCallbacks;
+
+    // Smart Chunk Manager & Raw Packet MethodHandles
+    private static MethodHandle hSendRaw;
+    private static MethodHandle hChunkLoaded;
+    private static MethodHandle hChunkLoad;
+    private static MethodHandle hChunkUnload;
+    private static MethodHandle hChunkCount;
+    private static MethodHandle hChunkGC;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -140,9 +147,29 @@ public final class NomeNativeBridge {
             hGetAntiXray = linker.downcallHandle(lookup.find("nome_native_get_antixray").orElseThrow(),
                     FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN));
 
-            // Register Java EventBridge Upcalls into C++ Engine
+            // Chunk & Raw Packet Downcalls
+            hSendRaw = linker.downcallHandle(lookup.find("nome_native_send_raw_packet").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+
+            hChunkLoaded = linker.downcallHandle(lookup.find("nome_native_chunk_is_loaded").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+
+            hChunkLoad = linker.downcallHandle(lookup.find("nome_native_chunk_load").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+
+            hChunkUnload = linker.downcallHandle(lookup.find("nome_native_chunk_unload").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_BOOLEAN));
+
+            hChunkCount = linker.downcallHandle(lookup.find("nome_native_chunk_get_loaded_count").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_LONG));
+
+            hChunkGC = linker.downcallHandle(lookup.find("nome_native_chunk_gc").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT));
+
+            // Register Java EventBridge Upcalls into C++ Engine (7 stubs)
             hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
-                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                            ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 
             registerUpcalls(linker);
 
@@ -185,8 +212,18 @@ public final class NomeNativeBridge {
             MemorySegment stubMove = linker.upcallStub(mhMove,
                     FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_BOOLEAN), Arena.global());
 
-            hRegisterCallbacks.invokeExact(stubJoin, stubQuit, stubChat, stubBreak, stubMove);
-            System.out.println("[Nome-Bridge] Project Panama zero-overhead Upcall Stubs registered into Native Engine.");
+            MethodHandle mhRecv = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnPacketReceive",
+                    MethodType.methodType(boolean.class, long.class, int.class, MemorySegment.class, long.class));
+            MemorySegment stubRecv = linker.upcallStub(mhRecv,
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG), Arena.global());
+
+            MethodHandle mhSend = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnPacketSend",
+                    MethodType.methodType(boolean.class, long.class, int.class, MemorySegment.class, long.class));
+            MemorySegment stubSend = linker.upcallStub(mhSend,
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG), Arena.global());
+
+            hRegisterCallbacks.invokeExact(stubJoin, stubQuit, stubChat, stubBreak, stubMove, stubRecv, stubSend);
+            System.out.println("[Nome-Bridge] Project Panama zero-overhead Upcall Stubs (Events + Packet Interceptors) registered.");
         } catch (Throwable t) {
             System.err.println("[Nome-Bridge] Warning: Failed to register native upcall callbacks: " + t.getMessage());
         }
@@ -274,12 +311,64 @@ public final class NomeNativeBridge {
             p.setOnGround(onGround);
 
             if (event.isCancelled()) {
-                // Anticheat cancelled movement: Native C++ will rollback / setback the player!
+                // Anticheat cancelled movement: Native C++ rubberband setback!
                 return false;
             }
 
             p.setLocationInternal(to);
             return true;
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return true;
+        }
+    }
+
+    public static boolean nativeCallbackOnPacketReceive(long playerId, int packetId, MemorySegment payloadSeg, long payloadLen) {
+        try {
+            NomeServer server = NomeServer.getInstance();
+            if (server == null) return true;
+            Player p = server.getPlayerById((int) playerId);
+            if (p == null) return true;
+
+            byte[] bytes = new byte[(int) payloadLen];
+            if (payloadLen > 0 && payloadSeg != null && !payloadSeg.equals(MemorySegment.NULL)) {
+                MemorySegment.copy(payloadSeg, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
+            }
+
+            // 1. Route to ProtocolLib manager (GrimAC, Vulcan, etc.)
+            boolean allow = ProtocolLibrary.getProtocolManager().onPacketReceive(p, packetId, bytes);
+            if (!allow) return false;
+
+            // 2. Route to standard Bukkit EventBus
+            PlayerReceivePacketEvent event = new PlayerReceivePacketEvent(p, packetId, bytes);
+            server.getPluginManager().callEvent(event);
+            return !event.isCancelled();
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return true;
+        }
+    }
+
+    public static boolean nativeCallbackOnPacketSend(long playerId, int packetId, MemorySegment payloadSeg, long payloadLen) {
+        try {
+            NomeServer server = NomeServer.getInstance();
+            if (server == null) return true;
+            Player p = server.getPlayerById((int) playerId);
+            if (p == null) return true;
+
+            byte[] bytes = new byte[(int) payloadLen];
+            if (payloadLen > 0 && payloadSeg != null && !payloadSeg.equals(MemorySegment.NULL)) {
+                MemorySegment.copy(payloadSeg, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
+            }
+
+            // 1. Route to ProtocolLib manager (RayTraceAntiXray, etc.)
+            boolean allow = ProtocolLibrary.getProtocolManager().onPacketSend(p, packetId, bytes);
+            if (!allow) return false;
+
+            // 2. Route to standard Bukkit EventBus
+            PlayerSendPacketEvent event = new PlayerSendPacketEvent(p, packetId, bytes);
+            server.getPluginManager().callEvent(event);
+            return !event.isCancelled();
         } catch (Throwable t) {
             t.printStackTrace();
             return true;
@@ -416,6 +505,62 @@ public final class NomeNativeBridge {
             return (boolean) hGetAntiXray.invokeExact();
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    public static void sendRawPacket(long playerId, int packetId, byte[] payload) {
+        if (!initialized) return;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment pSeg = payload != null ? arena.allocateFrom(ValueLayout.JAVA_BYTE, payload) : MemorySegment.NULL;
+            long len = payload != null ? payload.length : 0;
+            hSendRaw.invokeExact(playerId, packetId, pSeg, len);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static boolean isChunkLoaded(int cx, int cz) {
+        if (!initialized) return false;
+        try {
+            return (boolean) hChunkLoaded.invokeExact(cx, cz);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static void loadChunk(int cx, int cz) {
+        if (!initialized) return;
+        try {
+            hChunkLoad.invokeExact(cx, cz);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static boolean unloadChunk(int cx, int cz, boolean force) {
+        if (!initialized) return false;
+        try {
+            return (boolean) hChunkUnload.invokeExact(cx, cz, force);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static long getLoadedChunkCount() {
+        if (!initialized) return 0;
+        try {
+            return (long) hChunkCount.invokeExact();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public static long collectChunkGarbage(int maxIdleSeconds) {
+        if (!initialized) return 0;
+        try {
+            return (long) hChunkGC.invokeExact(maxIdleSeconds);
+        } catch (Throwable t) {
+            return 0;
         }
     }
 

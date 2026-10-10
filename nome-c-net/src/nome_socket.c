@@ -15,12 +15,16 @@
   #include <fcntl.h>
 #endif
 
-// External Native C++ WorldGen & Crafting Linkage
+// External Native C++ WorldGen, Crafting & ChunkManager Linkage
 #ifdef __cplusplus
 extern "C" {
 #endif
 void nome_worldgen_generate_chunk(int chunk_x, int chunk_z, uint16_t* out_blocks, int64_t seed);
 size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf);
+size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf);
+void nome_chunk_init(int64_t seed);
+uint16_t nome_chunk_get_block(int x, int y, int z);
+void nome_chunk_set_block(int x, int y, int z, uint16_t block);
 bool nome_crafting_solve(const uint16_t* grid, uint8_t grid_dim, uint16_t* out_item, uint8_t* out_count);
 bool nome_worldgen_locate_structure(const char* structure_name, int origin_chunk_x, int origin_chunk_z, int* out_chunk_x, int* out_chunk_z, int64_t seed);
 int32_t nome_entity_spawn(uint16_t type, double x, double y, double z);
@@ -42,6 +46,9 @@ struct NomeServerNetwork {
     NomeOnBlockBreakFn on_break;
     NomeOnPlayerMoveFn on_move;
     NomeOnPlayerInteractFn on_interact;
+
+    NomeOnPacketReceiveFn on_packet_receive;
+    NomeOnPacketSendFn on_packet_send;
 
     // Master Spawn Chunk Column (16x16x384 voxels)
     uint16_t spawn_chunk[16 * 16 * 384];
@@ -194,7 +201,33 @@ void nome_net_destroy(NomeServerNetwork *net) {
     free(net);
 }
 
+static NomeServerNetwork *g_active_net = NULL;
+static void send_raw_packet(int fd, int32_t packet_id, const uint8_t *payload, size_t payload_len);
+
+void nome_net_set_packet_listener(NomeServerNetwork *net, NomeOnPacketReceiveFn on_recv, NomeOnPacketSendFn on_send) {
+    if (net) {
+        net->on_packet_receive = on_recv;
+        net->on_packet_send = on_send;
+    }
+}
+
+void nome_net_send_raw(NomeServerNetwork *net, uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len) {
+    if (!net) return;
+    for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
+        if (net->clients[i].is_active && (uint64_t)net->clients[i].socket_fd == player_id) {
+            send_raw_packet(net->clients[i].socket_fd, packet_id, payload, len);
+            break;
+        }
+    }
+}
+
 static void send_raw_packet(int fd, int32_t packet_id, const uint8_t *payload, size_t payload_len) {
+    // Universal Packet Interception Hook for Anticheat, Anti-Xray and ProtocolLib
+    if (g_active_net && g_active_net->on_packet_send) {
+        bool allow = g_active_net->on_packet_send((uint64_t)fd, packet_id, payload, payload_len);
+        if (!allow) return; // Dropped/Filtered by external plugin
+    }
+
     uint8_t id_buf[5];
     int id_len = nome_varint_encode(packet_id, id_buf);
 
@@ -209,7 +242,37 @@ static void send_raw_packet(int fd, int32_t packet_id, const uint8_t *payload, s
     }
 }
 
+static void nome_net_queue_spiral_chunks(NomeClientSession *c, int center_cx, int center_cz, int view_dist) {
+    if (!c) return;
+    int r = view_dist;
+    if (r < 1) r = 1;
+    if (r > 6) r = 6;
+    c->pending_chunk_head = 0;
+    c->pending_chunk_count = 0;
+
+    // Center chunk first
+    c->pending_chunk_x[c->pending_chunk_count] = center_cx;
+    c->pending_chunk_z[c->pending_chunk_count] = center_cz;
+    c->pending_chunk_count++;
+
+    // Spiral outwards
+    for (int rad = 1; rad <= r; rad++) {
+        for (int dz = -rad; dz <= rad; dz++) {
+            for (int dx = -rad; dx <= rad; dx++) {
+                if (dx*dx + dz*dz <= rad*rad && dx*dx + dz*dz > (rad-1)*(rad-1)) {
+                    if (c->pending_chunk_count < (int)(sizeof(c->pending_chunk_x)/sizeof(c->pending_chunk_x[0]))) {
+                        c->pending_chunk_x[c->pending_chunk_count] = center_cx + dx;
+                        c->pending_chunk_z[c->pending_chunk_count] = center_cz + dz;
+                        c->pending_chunk_count++;
+                    }
+                }
+            }
+        }
+    }
+}
+
 static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c) {
+    g_active_net = net;
     int fd = c->socket_fd;
     uint8_t b_false = 0;
     uint8_t b_true = 1;
@@ -226,9 +289,9 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
 
     // max_players = 100
     nome_buffer_write_varint(bLogin, 100);
-    // view distance = 10, sim distance = 10
-    nome_buffer_write_varint(bLogin, 10);
-    nome_buffer_write_varint(bLogin, 10);
+    // view distance = 4, sim distance = 4
+    nome_buffer_write_varint(bLogin, 4);
+    nome_buffer_write_varint(bLogin, 4);
     // reduced debug info (false), do respawn screen (true), do limited craft (false)
     uint8_t flags[3] = {0, 1, 0};
     nome_buffer_write(bLogin, flags, 3);
@@ -280,14 +343,21 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     send_raw_packet(fd, 0x40, bPos->data, bPos->write_pos);
     nome_buffer_free(bPos);
 
-    // 4. Packet 0x27: Full 24-Section Paletted Chunk Data (Procedural 3D WorldGen)
+    // 4. Initialize Smart Chunk Streaming (View distance 4 spiral queue)
+    c->view_distance = 4;
+    c->current_chunk_x = 0;
+    c->current_chunk_z = 0;
+    nome_net_queue_spiral_chunks(c, 0, 0, c->view_distance);
+
+    // Immediately send center chunk (0, 0)
     static uint8_t chunk_payload[65536];
-    size_t chunk_len = nome_worldgen_serialize_chunk(0, 0, net->spawn_chunk, chunk_payload, sizeof(chunk_payload));
+    size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload));
     if (chunk_len > 0) {
         send_raw_packet(fd, 0x27, chunk_payload, chunk_len);
+        c->pending_chunk_head = 1; // Center sent, rest streams per tick
     }
 
-    printf("[Nome-Net-C] Sent Full Play Sequence (Login, Spawn, SyncPosition, 3D WorldGen Chunk) to '%s'\n", c->username);
+    printf("[Nome-Net-C] Sent Full Play Sequence (Login, Spawn, SyncPosition, Center 3D Chunk) to '%s'\n", c->username);
 }
 
 static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) {
@@ -363,6 +433,19 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 send_full_play_sequence(net, c);
             }
         } else if (c->state == NOME_STATE_PLAY) {
+            // Universal Packet Interception Hook for Anticheat & ProtocolLib
+            if (net->on_packet_receive) {
+                bool allow = net->on_packet_receive((uint64_t)c->socket_fd, packet_id, payload, payload_len);
+                if (!allow) {
+                    // Packet dropped by Anticheat or PacketFilter plugin
+                    c->rx_len -= full_packet_size;
+                    if (c->rx_len > 0) {
+                        memmove(c->rx_buf, c->rx_buf + full_packet_size, c->rx_len);
+                    }
+                    continue;
+                }
+            }
+
             // KeepAlive Response (0x15 / 0x18 / 0x1B)
             if (packet_id == 0x15 || packet_id == 0x18 || packet_id == 0x1B) {
                 // KeepAlive acknowledged by client
@@ -428,6 +511,15 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     c->yaw = new_yaw;
                     c->pitch = new_pitch;
                     c->on_ground = on_ground;
+
+                    // Smart Chunk Loading on chunk boundary crossing
+                    int new_cx = ((int)new_x) >> 4;
+                    int new_cz = ((int)new_z) >> 4;
+                    if (new_cx != c->current_chunk_x || new_cz != c->current_chunk_z) {
+                        c->current_chunk_x = new_cx;
+                        c->current_chunk_z = new_cz;
+                        nome_net_queue_spiral_chunks(c, new_cx, new_cz, c->view_distance);
+                    }
                 }
             }
             // Player Action / Digging / Block Break (0x1E / 0x24)
@@ -703,6 +795,25 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
         }
     }
 
+    // 3. Process Smart Chunk Streaming Queue (Throttled: max 2 chunks per tick per client)
+    for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
+        NomeClientSession *c = &net->clients[i];
+        if (c->is_active && c->state == NOME_STATE_PLAY && c->pending_chunk_head < c->pending_chunk_count) {
+            int sent_this_poll = 0;
+            static uint8_t chunk_payload[65536];
+            while (c->pending_chunk_head < c->pending_chunk_count && sent_this_poll < 2) {
+                int cx = c->pending_chunk_x[c->pending_chunk_head];
+                int cz = c->pending_chunk_z[c->pending_chunk_head];
+                c->pending_chunk_head++;
+                size_t chunk_len = nome_chunk_serialize(cx, cz, chunk_payload, sizeof(chunk_payload));
+                if (chunk_len > 0) {
+                    send_raw_packet(c->socket_fd, 0x27, chunk_payload, chunk_len);
+                    sent_this_poll++;
+                }
+            }
+        }
+    }
+
     return (size_t)activity;
 }
 
@@ -765,7 +876,7 @@ void nome_net_send_block_change(NomeServerNetwork *net, int32_t x, int32_t y, in
     }
 }
 
-void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, int window_id, int slot, uint16_t item_id, uint8_t count) {
+void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, uint8_t window_id, int16_t slot, uint16_t item_id, uint8_t count) {
     if (!net) return;
     for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
         if (net->clients[i].is_active && (uint64_t)net->clients[i].socket_fd == player_id) {

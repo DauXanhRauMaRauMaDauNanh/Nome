@@ -19,6 +19,7 @@ g++ -O3 -shared -static-libgcc -static-libstdc++ `
     ./nome-cpp-physics/src/nome_collision.cpp `
     ./nome-cpp-physics/src/nome_lighting.cpp `
     ./nome-cpp-physics/src/nome_worldgen.cpp `
+    ./nome-cpp-physics/src/nome_chunk_manager.cpp `
     ./nome-cpp-physics/src/nome_crafting.cpp `
     ./nome-cpp-physics/src/nome_entity.cpp `
     ./bin/native/nome_core_unified.cpp `

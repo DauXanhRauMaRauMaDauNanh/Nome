@@ -1,6 +1,7 @@
 #include "nome_c_net.h"
 #include "nome_physics.hpp"
 #include "nome_worldgen.hpp"
+#include "nome_chunk_manager.hpp"
 #include "nome_crafting.hpp"
 #include "nome_entity.hpp"
 #include <chrono>
@@ -17,7 +18,7 @@
   #define NOME_EXPORT __attribute__((visibility("default")))
 #endif
 
-// Master 16x16x384 Native World State (All in Native C++, ZERO JVM Heap)
+// Master Native World State (All in Native C++, ZERO JVM Heap)
 struct NativeServerState {
     std::atomic<bool> is_running{false};
     std::atomic<uint64_t> tick_counter{0};
@@ -37,6 +38,8 @@ struct NativeServerState {
     NomeOnPlayerChatFn java_on_chat{nullptr};
     NomeOnBlockBreakFn java_on_break{nullptr};
     NomeOnPlayerMoveFn java_on_move{nullptr};
+    NomeOnPacketReceiveFn java_on_packet_recv{nullptr};
+    NomeOnPacketSendFn java_on_packet_send{nullptr};
 };
 
 static NativeServerState* g_server = nullptr;
@@ -68,6 +71,20 @@ static void internal_on_block_break(uint64_t player_id, int32_t x, int32_t y, in
 static bool internal_on_player_move(uint64_t player_id, double from_x, double from_y, double from_z, double to_x, double to_y, double to_z, bool on_ground) {
     if (g_server && g_server->java_on_move) {
         return g_server->java_on_move(player_id, from_x, from_y, from_z, to_x, to_y, to_z, on_ground);
+    }
+    return true;
+}
+
+static bool internal_on_packet_receive(uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len) {
+    if (g_server && g_server->java_on_packet_recv) {
+        return g_server->java_on_packet_recv(player_id, packet_id, payload, len);
+    }
+    return true;
+}
+
+static bool internal_on_packet_send(uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len) {
+    if (g_server && g_server->java_on_packet_send) {
+        return g_server->java_on_packet_send(player_id, packet_id, payload, len);
     }
     return true;
 }
@@ -115,16 +132,17 @@ static void native_tick_loop() {
 extern "C" {
 
 NOME_EXPORT const char* nome_rust_version() {
-    return "Nome-Core v0.4.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/Crafting/Entities/Lighting) + Rust Architecture]";
+    return "Nome-Core v0.5.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/ChunkManager/Crafting/Entities) + Rust Architecture]";
 }
 
 NOME_EXPORT bool nome_native_init() {
     if (!g_server) {
         g_server = new NativeServerState();
         
-        // Procedurally generate the spawn world in pure Native C++ (Perlin 3D Noise)
-        printf("[Nome-Core] Procedurally generating 3D Voxel World (Height: -64 to 319)...\n");
-        nome_worldgen_generate_chunk(0, 0, g_server->spawn_blocks, 1337);
+        // Initialize multi-chunk manager and procedural terrain generator
+        printf("[Nome-Core] Initializing Off-Heap Smart Chunk Manager (Seed: 1337)...\n");
+        nome_chunk_init(1337);
+        nome_chunk_load(0, 0);
 
         // Spawn initial vanilla mobs (Villager, Cow, Sheep, Zombie) into native ECS
         printf("[Nome-Core] Spawning Initial Vanilla Entities (Villager, Cow, Sheep, Zombie)...\n");
@@ -140,6 +158,7 @@ NOME_EXPORT bool nome_native_init() {
                                internal_on_player_chat,
                                internal_on_block_break);
         nome_net_set_move_callback(g_server->network, internal_on_player_move);
+        nome_net_set_packet_listener(g_server->network, internal_on_packet_receive, internal_on_packet_send);
     }
     return true;
 }
@@ -179,14 +198,44 @@ NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,
                                               NomeOnPlayerQuitFn on_quit,
                                               NomeOnPlayerChatFn on_chat,
                                               NomeOnBlockBreakFn on_break,
-                                              NomeOnPlayerMoveFn on_move) {
+                                              NomeOnPlayerMoveFn on_move,
+                                              NomeOnPacketReceiveFn on_recv,
+                                              NomeOnPacketSendFn on_send) {
     if (g_server) {
         g_server->java_on_join = on_join;
         g_server->java_on_quit = on_quit;
         g_server->java_on_chat = on_chat;
         g_server->java_on_break = on_break;
         g_server->java_on_move = on_move;
+        g_server->java_on_packet_recv = on_recv;
+        g_server->java_on_packet_send = on_send;
     }
+}
+
+NOME_EXPORT void nome_native_send_raw_packet(uint64_t player_id, int32_t packet_id, const uint8_t* payload, size_t len) {
+    if (g_server && g_server->network) {
+        nome_net_send_raw(g_server->network, player_id, packet_id, payload, len);
+    }
+}
+
+NOME_EXPORT bool nome_native_chunk_is_loaded(int cx, int cz) {
+    return nome_chunk_is_loaded(cx, cz);
+}
+
+NOME_EXPORT void nome_native_chunk_load(int cx, int cz) {
+    nome_chunk_load(cx, cz);
+}
+
+NOME_EXPORT bool nome_native_chunk_unload(int cx, int cz, bool force) {
+    return nome_chunk_unload(cx, cz, force);
+}
+
+NOME_EXPORT size_t nome_native_chunk_get_loaded_count() {
+    return nome_chunk_get_loaded_count();
+}
+
+NOME_EXPORT size_t nome_native_chunk_gc(int max_idle_seconds) {
+    return nome_chunk_gc(max_idle_seconds);
 }
 
 NOME_EXPORT void nome_native_set_antixray(bool enabled) {
@@ -208,11 +257,7 @@ NOME_EXPORT double nome_native_get_mspt() {
 
 NOME_EXPORT void nome_native_set_block(int32_t x, int32_t y, int32_t z, uint16_t block_id) {
     if (!g_server) return;
-    int idx = ((y + 64) * 256) + ((z & 15) * 16) + (x & 15);
-    if (idx >= 0 && idx < 16 * 16 * 384) {
-        std::lock_guard<std::mutex> lock(g_server->state_mutex);
-        g_server->spawn_blocks[idx] = block_id;
-    }
+    nome_chunk_set_block(x, y, z, block_id);
     if (g_server->network) {
         nome_net_send_block_change(g_server->network, x, y, z, block_id);
     }
@@ -220,12 +265,7 @@ NOME_EXPORT void nome_native_set_block(int32_t x, int32_t y, int32_t z, uint16_t
 
 NOME_EXPORT uint16_t nome_native_get_block(int32_t x, int32_t y, int32_t z) {
     if (!g_server) return 0;
-    int idx = ((y + 64) * 256) + ((z & 15) * 16) + (x & 15);
-    if (idx >= 0 && idx < 16 * 16 * 384) {
-        std::lock_guard<std::mutex> lock(g_server->state_mutex);
-        return g_server->spawn_blocks[idx];
-    }
-    return 0;
+    return nome_chunk_get_block(x, y, z);
 }
 
 NOME_EXPORT void nome_native_broadcast_message(const char *message) {

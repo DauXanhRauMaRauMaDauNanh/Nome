@@ -12,7 +12,7 @@ public class SimpleServicesManager implements ServicesManager {
 
     @Override
     public synchronized <T> void register(Class<T> service, T provider, Plugin plugin, ServicePriority priority) {
-        if (service == null || provider == null || plugin == null || priority == null) {
+        if (service == null || provider == null || priority == null) {
             throw new IllegalArgumentException("Parameters cannot be null");
         }
         RegisteredServiceProvider<T> registered = new RegisteredServiceProvider<>(service, provider, priority, plugin);

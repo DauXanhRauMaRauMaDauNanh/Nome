@@ -2,8 +2,8 @@
 #define NOME_C_NET_H
 
 #include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef _WIN32
   #define NOME_API __declspec(dllexport)
@@ -16,36 +16,36 @@ extern "C" {
 #endif
 
 /* =========================================================================
-   1. Fast VarInt / VarLong SIMD-Optimized Codecs (Minecraft Protocol)
+   1. Fast VarInt & VarLong Encoders / Decoders
    ========================================================================= */
 
-NOME_API int nome_varint_encode(int32_t value, uint8_t *out_buffer);
-NOME_API int nome_varint_decode(const uint8_t *in_buffer, size_t max_len, int32_t *out_value);
+NOME_API int nome_varint_encode(int32_t value, uint8_t *out_buf);
+NOME_API int nome_varint_decode(const uint8_t *in_buf, size_t max_len, int32_t *out_val);
 
-NOME_API int nome_varlong_encode(int64_t value, uint8_t *out_buffer);
-NOME_API int nome_varlong_decode(const uint8_t *in_buffer, size_t max_len, int64_t *out_value);
+NOME_API int nome_varlong_encode(int64_t value, uint8_t *out_buf);
+NOME_API int nome_varlong_decode(const uint8_t *in_buf, size_t max_len, int64_t *out_val);
 
 /* =========================================================================
-   2. Zero-Copy Packet Buffer & Arena Allocator
+   2. Zero-Allocation Packet Buffer
    ========================================================================= */
 
 typedef struct NomePacketBuffer {
     uint8_t *data;
     size_t capacity;
-    size_t read_pos;
     size_t write_pos;
+    size_t read_pos;
 } NomePacketBuffer;
 
-NOME_API NomePacketBuffer* nome_buffer_create(size_t initial_capacity);
+NOME_API NomePacketBuffer* nome_buffer_create(size_t capacity);
 NOME_API void nome_buffer_free(NomePacketBuffer *buf);
 NOME_API void nome_buffer_reset(NomePacketBuffer *buf);
-NOME_API bool nome_buffer_write(NomePacketBuffer *buf, const uint8_t *src, size_t len);
-NOME_API bool nome_buffer_read(NomePacketBuffer *buf, uint8_t *dst, size_t len);
-NOME_API bool nome_buffer_write_varint(NomePacketBuffer *buf, int32_t val);
+
+NOME_API bool nome_buffer_write(NomePacketBuffer *buf, const uint8_t *data, size_t len);
+NOME_API bool nome_buffer_write_varint(NomePacketBuffer *buf, int32_t value);
 NOME_API bool nome_buffer_write_string(NomePacketBuffer *buf, const char *str);
 
 /* =========================================================================
-   3. Minecraft Protocol States & Client Session (Off-Heap State)
+   3. Protocol Connection State Machine
    ========================================================================= */
 
 typedef enum NomeConnState {
@@ -78,6 +78,15 @@ typedef struct NomeClientSession {
     uint8_t rx_buf[8192];
     size_t rx_len;
     bool is_active;
+
+    // Smart Chunk Loading State
+    int current_chunk_x;
+    int current_chunk_z;
+    int view_distance;
+    int pending_chunk_x[512];
+    int pending_chunk_z[512];
+    int pending_chunk_count;
+    int pending_chunk_head;
 } NomeClientSession;
 
 #define MAX_NOME_CLIENTS 256
@@ -96,6 +105,10 @@ typedef void (*NomeOnBlockBreakFn)(uint64_t player_id, int32_t x, int32_t y, int
 typedef bool (*NomeOnPlayerMoveFn)(uint64_t player_id, double from_x, double from_y, double from_z, double to_x, double to_y, double to_z, bool on_ground);
 typedef void (*NomeOnPlayerInteractFn)(uint64_t player_id, int32_t x, int32_t y, int32_t z, int32_t action);
 
+// Packet Interception callbacks for Anticheat, Anti-Xray & ProtocolLib
+typedef bool (*NomeOnPacketReceiveFn)(uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len);
+typedef bool (*NomeOnPacketSendFn)(uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len);
+
 NOME_API NomeServerNetwork* nome_net_create(const char *bind_ip, uint16_t port, int worker_threads);
 NOME_API bool nome_net_start(NomeServerNetwork *net);
 NOME_API void nome_net_stop(NomeServerNetwork *net);
@@ -109,16 +122,18 @@ NOME_API void nome_net_set_callbacks(NomeServerNetwork *net,
                                      NomeOnBlockBreakFn on_break);
 NOME_API void nome_net_set_move_callback(NomeServerNetwork *net, NomeOnPlayerMoveFn on_move);
 NOME_API void nome_net_set_interact_callback(NomeServerNetwork *net, NomeOnPlayerInteractFn on_interact);
+NOME_API void nome_net_set_packet_listener(NomeServerNetwork *net, NomeOnPacketReceiveFn on_recv, NomeOnPacketSendFn on_send);
 
-NOME_API void nome_net_broadcast_chat(NomeServerNetwork *net, const char *message);
-NOME_API void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x, double y, double z, float yaw, float pitch);
+NOME_API void nome_net_broadcast_chat(NomeServerNetwork *net, const char *msg);
 NOME_API void nome_net_send_block_change(NomeServerNetwork *net, int32_t x, int32_t y, int32_t z, uint16_t block_id);
-NOME_API void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, int window_id, int slot, uint16_t item_id, uint8_t count);
-
+NOME_API void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x, double y, double z, float yaw, float pitch);
+NOME_API void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, uint8_t window_id, int16_t slot, uint16_t item_id, uint8_t count);
+NOME_API void nome_net_send_raw(NomeServerNetwork *net, uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len);
+NOME_API void nome_net_queue_chunk(NomeServerNetwork *net, uint64_t player_id, int cx, int cz);
 NOME_API NomeClientSession* nome_net_get_client(NomeServerNetwork *net, uint64_t player_id);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* NOME_C_NET_H */
+#endif // NOME_C_NET_H
