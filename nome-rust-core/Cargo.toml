@@ -1,0 +1,25 @@
+[package]
+name = "nome-rust-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nome Dev Team"]
+description = "Nome high-performance Minecraft Server Native Engine in Rust"
+
+[lib]
+name = "nome_rust_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Dependencies for high-performance multithreaded Minecraft server:
+# crossbeam = "0.8"
+# rayon = "1.10"
+# parking_lot = "0.12"
+# zstd = "0.13"
+# serde = { version = "1.0", features = ["derive"] }
+# serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,21 @@
+# Reference large binary jars from Mojang & Paper
+leaf.jar
+paper.jar
+mojang_26.3.jar
+
+# Build artifacts & caches
+target/
+*.log
+cache/
+.cache/
+bundler/
+libraries/
+versions/
+node_modules/
+
+# OS and IDE files
+.idea/
+.vscode/
+*.tmp
+*.suo
+*.user
