@@ -37,16 +37,7 @@ public class SimpleChunk implements Chunk {
     @Override
     public ChunkSnapshot getChunkSnapshot(boolean includeMaxbiome, boolean includeBiome, boolean includeBiomeTempRain) {
         short[] blocks = new short[16 * 16 * 384];
-        for (int y = -64; y < 320; y++) {
-            for (int lz = 0; lz < 16; lz++) {
-                for (int lx = 0; lx < 16; lx++) {
-                    int gx = (x << 4) + lx;
-                    int gz = (z << 4) + lz;
-                    int idx = ((y + 64) * 256) + (lz * 16) + lx;
-                    blocks[idx] = NomeNativeBridge.getBlock(gx, y, gz);
-                }
-            }
-        }
+        NomeNativeBridge.getChunkAllBlocks(x, z, blocks);
         return new SimpleChunkSnapshot(x, z, world.getName(), blocks);
     }
 

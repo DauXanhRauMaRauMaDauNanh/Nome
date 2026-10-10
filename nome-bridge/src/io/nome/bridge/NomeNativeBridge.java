@@ -60,6 +60,9 @@ public final class NomeNativeBridge {
     private static MethodHandle hChunkUnload;
     private static MethodHandle hChunkCount;
     private static MethodHandle hChunkGC;
+    private static MethodHandle hChunkGetAllBlocks;
+    private static MethodHandle hChunkGetHeightmap;
+    private static MethodHandle hChunkGetSection;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -167,10 +170,19 @@ public final class NomeNativeBridge {
             hChunkGC = linker.downcallHandle(lookup.find("nome_native_chunk_gc").orElseThrow(),
                     FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT));
 
-            // Register Java EventBridge Upcalls into C++ Engine (7 stubs)
+            hChunkGetAllBlocks = linker.downcallHandle(lookup.find("nome_native_chunk_get_all_blocks").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+            hChunkGetHeightmap = linker.downcallHandle(lookup.find("nome_native_chunk_get_heightmap").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+            hChunkGetSection = linker.downcallHandle(lookup.find("nome_native_chunk_get_section").orElseThrow(),
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+            // Register Java EventBridge Upcalls into C++ Engine (8 stubs)
             hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
-                            ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+                            ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 
             registerUpcalls(linker);
 
@@ -222,7 +234,12 @@ public final class NomeNativeBridge {
             MemorySegment stubSend = linker.upcallStub(mhSend,
                     FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG), Arena.global());
 
-            hRegisterCallbacks.invokeExact(stubJoin, stubQuit, stubChat, stubBreak, stubMove, stubRecv, stubSend);
+            MethodHandle mhTick = lk.findStatic(NomeNativeBridge.class, "nativeCallbackOnTick",
+                    MethodType.methodType(void.class, long.class, double.class, double.class));
+            MemorySegment stubTick = linker.upcallStub(mhTick,
+                    FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_DOUBLE, ValueLayout.JAVA_DOUBLE), Arena.global());
+
+            hRegisterCallbacks.invokeExact(stubJoin, stubQuit, stubChat, stubBreak, stubMove, stubRecv, stubSend, stubTick);
         } catch (Throwable t) {
             System.err.println("[Nome-Bridge] Warning: Failed to register native upcall callbacks: " + t.getMessage());
         }
@@ -335,6 +352,17 @@ public final class NomeNativeBridge {
         }
     }
 
+    public static void nativeCallbackOnTick(long tick, double tps, double mspt) {
+        try {
+            NomeServer server = NomeServer.getInstance();
+            if (server != null) {
+                server.onServerTick(tick, tps, mspt);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
     public static boolean nativeCallbackOnPacketReceive(long playerId, int packetId, MemorySegment payloadSeg, long payloadLen) {
         try {
             NomeServer server = NomeServer.getInstance();
@@ -342,20 +370,30 @@ public final class NomeNativeBridge {
             Player p = server.getPlayerById((int) playerId);
             if (p == null) return true;
 
+            boolean hasProtoListeners = ProtocolLibrary.getProtocolManager().hasReceivingListeners(packetId);
+            boolean hasBusListeners = server.getPluginManager().hasListeners(PlayerReceivePacketEvent.class);
+            if (!hasProtoListeners && !hasBusListeners) {
+                return true; // Zero GC allocation!
+            }
+
             byte[] bytes = new byte[(int) payloadLen];
             if (payloadLen > 0 && payloadSeg != null && !payloadSeg.equals(MemorySegment.NULL)) {
                 MemorySegment sized = payloadSeg.reinterpret(payloadLen);
                 MemorySegment.copy(sized, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
             }
 
-            // 1. Route to ProtocolLib manager (GrimAC, Vulcan, etc.)
-            boolean allow = ProtocolLibrary.getProtocolManager().onPacketReceive(p, packetId, bytes);
-            if (!allow) return false;
+            if (hasProtoListeners) {
+                boolean allow = ProtocolLibrary.getProtocolManager().onPacketReceive(p, packetId, bytes);
+                if (!allow) return false;
+            }
 
-            // 2. Route to standard Bukkit EventBus
-            PlayerReceivePacketEvent event = new PlayerReceivePacketEvent(p, packetId, bytes);
-            server.getPluginManager().callEvent(event);
-            return !event.isCancelled();
+            if (hasBusListeners) {
+                PlayerReceivePacketEvent event = new PlayerReceivePacketEvent(p, packetId, bytes);
+                server.getPluginManager().callEvent(event);
+                return !event.isCancelled();
+            }
+
+            return true;
         } catch (Throwable t) {
             t.printStackTrace();
             return true;
@@ -369,20 +407,30 @@ public final class NomeNativeBridge {
             Player p = server.getPlayerById((int) playerId);
             if (p == null) return true;
 
+            boolean hasProtoListeners = ProtocolLibrary.getProtocolManager().hasSendingListeners(packetId);
+            boolean hasBusListeners = server.getPluginManager().hasListeners(PlayerSendPacketEvent.class);
+            if (!hasProtoListeners && !hasBusListeners) {
+                return true; // Zero GC allocation!
+            }
+
             byte[] bytes = new byte[(int) payloadLen];
             if (payloadLen > 0 && payloadSeg != null && !payloadSeg.equals(MemorySegment.NULL)) {
                 MemorySegment sized = payloadSeg.reinterpret(payloadLen);
                 MemorySegment.copy(sized, ValueLayout.JAVA_BYTE, 0, bytes, 0, (int) payloadLen);
             }
 
-            // 1. Route to ProtocolLib manager (RayTraceAntiXray, etc.)
-            boolean allow = ProtocolLibrary.getProtocolManager().onPacketSend(p, packetId, bytes);
-            if (!allow) return false;
+            if (hasProtoListeners) {
+                boolean allow = ProtocolLibrary.getProtocolManager().onPacketSend(p, packetId, bytes);
+                if (!allow) return false;
+            }
 
-            // 2. Route to standard Bukkit EventBus
-            PlayerSendPacketEvent event = new PlayerSendPacketEvent(p, packetId, bytes);
-            server.getPluginManager().callEvent(event);
-            return !event.isCancelled();
+            if (hasBusListeners) {
+                PlayerSendPacketEvent event = new PlayerSendPacketEvent(p, packetId, bytes);
+                server.getPluginManager().callEvent(event);
+                return !event.isCancelled();
+            }
+
+            return true;
         } catch (Throwable t) {
             t.printStackTrace();
             return true;
@@ -575,6 +623,39 @@ public final class NomeNativeBridge {
             return (long) hChunkGC.invokeExact(maxIdleSeconds);
         } catch (Throwable t) {
             return 0;
+        }
+    }
+
+    public static void getChunkAllBlocks(int cx, int cz, short[] outBlocks) {
+        if (!initialized || outBlocks == null || outBlocks.length < 16 * 16 * 384 || hChunkGetAllBlocks == null) return;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment seg = arena.allocate(ValueLayout.JAVA_SHORT, 16 * 16 * 384);
+            hChunkGetAllBlocks.invokeExact(cx, cz, seg);
+            MemorySegment.copy(seg, ValueLayout.JAVA_SHORT, 0, outBlocks, 0, 16 * 16 * 384);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void getChunkHeightmap(int cx, int cz, short[] outHeightmap) {
+        if (!initialized || outHeightmap == null || outHeightmap.length < 256 || hChunkGetHeightmap == null) return;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment seg = arena.allocate(ValueLayout.JAVA_SHORT, 256);
+            hChunkGetHeightmap.invokeExact(cx, cz, seg);
+            MemorySegment.copy(seg, ValueLayout.JAVA_SHORT, 0, outHeightmap, 0, 256);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void getChunkSection(int cx, int cz, int sectionY, short[] outSection) {
+        if (!initialized || outSection == null || outSection.length < 4096 || hChunkGetSection == null) return;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment seg = arena.allocate(ValueLayout.JAVA_SHORT, 4096);
+            hChunkGetSection.invokeExact(cx, cz, sectionY, seg);
+            MemorySegment.copy(seg, ValueLayout.JAVA_SHORT, 0, outSection, 0, 4096);
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 

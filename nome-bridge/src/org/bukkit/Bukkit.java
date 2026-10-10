@@ -57,6 +57,8 @@ public final class Bukkit {
     public static void setAntiXrayEnabled(boolean enabled) { server.setAntiXrayEnabled(enabled); }
     public static boolean isAntiXrayEnabled() { return server.isAntiXrayEnabled(); }
 
+    public static boolean isPrimaryThread() { return server.isPrimaryThread(); }
+
     // 100% Native C++ Crafting Engine Access for Java Plugins
     public static boolean craft2x2(short in0, short in1, short in2, short in3, short[] outResult) {
         return NomeNativeBridge.craft2x2(in0, in1, in2, in3, outResult);

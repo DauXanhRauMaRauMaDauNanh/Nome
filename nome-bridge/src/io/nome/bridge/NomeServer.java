@@ -42,7 +42,10 @@ public class NomeServer implements Server {
     private final Map<UUID, Player> players = new ConcurrentHashMap<>();
     private final Map<Integer, Player> playersById = new ConcurrentHashMap<>();
     private final Map<String, OfflinePlayer> offlinePlayers = new ConcurrentHashMap<>();
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
+    private volatile Thread serverThread = null;
+    private volatile double currentTPS = 20.0;
+    private volatile double currentMSPT = 0.05;
 
     public NomeServer() {
         instance = this;
@@ -125,9 +128,24 @@ public class NomeServer implements Server {
         MinecraftConsole.info("[Nome] Timings reset");
     }
 
+    public void onServerTick(long tick, double tps, double mspt) {
+        if (serverThread == null) {
+            serverThread = Thread.currentThread();
+            serverThread.setName("Server thread");
+        }
+        this.currentTPS = tps;
+        this.currentMSPT = mspt;
+        scheduler.mainThreadHeartbeat(tick);
+    }
+
     public void tick() {
         if (!isRunning) return;
         NomeNativeBridge.tickOnce();
+    }
+
+    @Override
+    public boolean isPrimaryThread() {
+        return Thread.currentThread() == serverThread;
     }
 
     public void stop() {
@@ -223,13 +241,12 @@ public class NomeServer implements Server {
 
     @Override
     public double[] getTPS() {
-        double current = NomeNativeBridge.tickOnce();
-        return new double[]{current, current, current};
+        return new double[]{currentTPS, currentTPS, currentTPS};
     }
 
     @Override
     public double getMSPT() {
-        return NomeNativeBridge.getMspt();
+        return currentMSPT;
     }
 
     @Override

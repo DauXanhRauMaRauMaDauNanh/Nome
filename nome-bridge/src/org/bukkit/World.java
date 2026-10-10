@@ -89,12 +89,13 @@ public class World {
     }
 
     public int getHighestBlockYAt(int x, int z) {
-        for (int y = 319; y >= -64; y--) {
-            if (getBlockAt(x, y, z).getType() != Material.AIR) {
-                return y;
-            }
-        }
-        return -64;
+        int cx = x >> 4;
+        int cz = z >> 4;
+        int lx = x & 15;
+        int lz = z & 15;
+        short[] heightmap = new short[256];
+        NomeNativeBridge.getChunkHeightmap(cx, cz, heightmap);
+        return heightmap[lz * 16 + lx];
     }
 
     public Block getHighestBlockAt(int x, int z) {

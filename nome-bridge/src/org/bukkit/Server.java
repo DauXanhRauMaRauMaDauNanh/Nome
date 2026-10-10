@@ -44,4 +44,6 @@ public interface Server {
     // Anti-Xray Control (Paper/Leaf Engine Mode 1)
     void setAntiXrayEnabled(boolean enabled);
     boolean isAntiXrayEnabled();
+
+    boolean isPrimaryThread();
 }

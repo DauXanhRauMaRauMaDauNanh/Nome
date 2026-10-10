@@ -7,6 +7,7 @@ import org.bukkit.event.Listener;
 public interface PluginManager {
     void registerEvents(Listener listener, Plugin plugin);
     void callEvent(Event event);
+    boolean hasListeners(Class<? extends Event> eventClass);
     Plugin getPlugin(String name);
     Plugin[] getPlugins();
     boolean isPluginEnabled(String name);

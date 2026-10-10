@@ -53,6 +53,8 @@ static NomeOnBlockBreakFn g_cb_on_break = nullptr;
 static NomeOnPlayerMoveFn g_cb_on_move = nullptr;
 static NomeOnPacketReceiveFn g_cb_on_recv = nullptr;
 static NomeOnPacketSendFn g_cb_on_send = nullptr;
+typedef void (*NomeOnTickFn)(uint64_t tick, double tps, double mspt);
+static NomeOnTickFn g_cb_on_tick = nullptr;
 
 static void internal_on_player_join(uint64_t player_id, const char *username) {
     if (g_cb_on_join) {
@@ -121,7 +123,12 @@ static void native_tick_loop() {
         nome::EntityManager::Instance().Tick(g_server->spawn_blocks, targets);
 
         // 3. Physics & collision pass (C++ AABB checks)
-        g_server->tick_counter.fetch_add(1);
+        uint64_t cur_tick = g_server->tick_counter.fetch_add(1);
+
+        // 4. Main Thread Tick Upcall into Java Runtime & Bukkit Scheduler
+        if (g_cb_on_tick) {
+            g_cb_on_tick(cur_tick, g_server->rolling_tps, g_server->current_mspt);
+        }
 
         auto end_time = std::chrono::high_resolution_clock::now();
         double ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
@@ -222,7 +229,8 @@ NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,
                                               NomeOnBlockBreakFn on_break,
                                               NomeOnPlayerMoveFn on_move,
                                               NomeOnPacketReceiveFn on_recv,
-                                              NomeOnPacketSendFn on_send) {
+                                              NomeOnPacketSendFn on_send,
+                                              NomeOnTickFn on_tick) {
     g_cb_on_join = on_join;
     g_cb_on_quit = on_quit;
     g_cb_on_chat = on_chat;
@@ -230,6 +238,7 @@ NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,
     g_cb_on_move = on_move;
     g_cb_on_recv = on_recv;
     g_cb_on_send = on_send;
+    g_cb_on_tick = on_tick;
 }
 
 NOME_EXPORT void nome_native_send_raw_packet(uint64_t player_id, int32_t packet_id, const uint8_t* payload, size_t len) {
@@ -244,6 +253,18 @@ NOME_EXPORT bool nome_native_chunk_is_loaded(int cx, int cz) {
 
 NOME_EXPORT void nome_native_chunk_load(int cx, int cz) {
     nome_chunk_load(cx, cz);
+}
+
+NOME_EXPORT void nome_native_chunk_get_heightmap(int cx, int cz, int16_t* out_heightmap) {
+    nome_chunk_get_heightmap(cx, cz, out_heightmap);
+}
+
+NOME_EXPORT void nome_native_chunk_get_section(int cx, int cz, int section_y, uint16_t* out_blocks) {
+    nome_chunk_get_section(cx, cz, section_y, out_blocks);
+}
+
+NOME_EXPORT void nome_native_chunk_get_all_blocks(int cx, int cz, uint16_t* out_blocks) {
+    nome_chunk_get_all_blocks(cx, cz, out_blocks);
 }
 
 NOME_EXPORT bool nome_native_chunk_unload(int cx, int cz, bool force) {

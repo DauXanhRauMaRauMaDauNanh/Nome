@@ -25,6 +25,22 @@ public class ProtocolManager {
         }
     }
 
+    public boolean hasReceivingListeners(int packetId) {
+        if (listeners.isEmpty()) return false;
+        for (PacketAdapter adapter : listeners) {
+            if (adapter.listensTo(packetId)) return true;
+        }
+        return false;
+    }
+
+    public boolean hasSendingListeners(int packetId) {
+        if (listeners.isEmpty()) return false;
+        for (PacketAdapter adapter : listeners) {
+            if (adapter.listensTo(packetId)) return true;
+        }
+        return false;
+    }
+
     public void sendServerPacket(Player player, PacketContainer packet) {
         if (player == null || packet == null) return;
         NomeNativeBridge.sendRawPacket((long) player.getEntityId(), packet.getType(), packet.getData());

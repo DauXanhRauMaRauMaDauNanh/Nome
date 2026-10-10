@@ -727,28 +727,59 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
             }
 
             if (palette.size() == 1) {
-                // Single block type section
+                // Single-valued palette
                 sec_buffer[sec_pos++] = 0; // bits_per_entry = 0
                 sec_pos += write_varint(sec_buffer + sec_pos, palette[0]);
-                sec_pos += write_varint(sec_buffer + sec_pos, 0);
-            } else {
-                // Indirect palette: 4 bits per entry (up to 16 entries)
-                sec_buffer[sec_pos++] = 4; // bits_per_entry = 4
+                sec_pos += write_varint(sec_buffer + sec_pos, 0); // data len = 0
+            } else if (palette.size() <= 256) {
+                // Indirect palette: determine minimal BPE between 4 and 8
+                uint8_t bpe = 4;
+                if (palette.size() > 128) bpe = 8;
+                else if (palette.size() > 64) bpe = 7;
+                else if (palette.size() > 32) bpe = 6;
+                else if (palette.size() > 16) bpe = 5;
+
+                sec_buffer[sec_pos++] = bpe;
                 sec_pos += write_varint(sec_buffer + sec_pos, (int32_t)palette.size());
                 for (uint16_t p : palette) {
                     sec_pos += write_varint(sec_buffer + sec_pos, p);
                 }
-                sec_pos += write_varint(sec_buffer + sec_pos, 256); // 256 longs
 
-                // Pack 4096 entries (16 entries per 64-bit long)
-                for (int l = 0; l < 256; l++) {
+                // Pack 4096 entries (entries do NOT span across long boundaries per 1.16+ spec)
+                int entries_per_long = 64 / bpe;
+                int num_longs = (4096 + entries_per_long - 1) / entries_per_long;
+                sec_pos += write_varint(sec_buffer + sec_pos, num_longs);
+
+                int block_idx = 0;
+                for (int l = 0; l < num_longs; l++) {
                     uint64_t val = 0;
-                    for (int e = 0; e < 16; e++) {
-                        int idx = l * 16 + e;
-                        uint16_t b = sec_blocks[idx];
-                        auto it = std::find(palette.begin(), palette.end(), b);
-                        uint64_t p_idx = (it != palette.end()) ? (uint64_t)(it - palette.begin()) : 0;
-                        val |= (p_idx << (e * 4));
+                    for (int e = 0; e < entries_per_long; e++) {
+                        if (block_idx < 4096) {
+                            uint16_t b = sec_blocks[block_idx++];
+                            auto it = std::find(palette.begin(), palette.end(), b);
+                            uint64_t p_idx = (it != palette.end()) ? (uint64_t)(it - palette.begin()) : 0;
+                            val |= (p_idx << (e * bpe));
+                        }
+                    }
+                    write_be64(sec_buffer + sec_pos, val);
+                    sec_pos += 8;
+                }
+            } else {
+                // Direct palette: 15 bits per entry (no palette array sent)
+                uint8_t bpe = 15;
+                sec_buffer[sec_pos++] = bpe;
+                int entries_per_long = 64 / bpe; // 4
+                int num_longs = (4096 + entries_per_long - 1) / entries_per_long; // 1024
+                sec_pos += write_varint(sec_buffer + sec_pos, num_longs);
+
+                int block_idx = 0;
+                for (int l = 0; l < num_longs; l++) {
+                    uint64_t val = 0;
+                    for (int e = 0; e < entries_per_long; e++) {
+                        if (block_idx < 4096) {
+                            uint64_t b = (uint64_t)sec_blocks[block_idx++];
+                            val |= ((b & 0x7FFF) << (e * bpe));
+                        }
                     }
                     write_be64(sec_buffer + sec_pos, val);
                     sec_pos += 8;

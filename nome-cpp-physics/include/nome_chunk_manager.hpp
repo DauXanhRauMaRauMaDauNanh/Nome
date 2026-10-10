@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
+#include <cstring>
 
 #ifdef _WIN32
   #define NOME_CHUNK_API __declspec(dllexport)
@@ -61,6 +62,41 @@ public:
         is_modified = true;
         last_access = std::chrono::steady_clock::now();
     }
+
+    void GetHeightmap(int16_t* out_heightmap) {
+        if (!out_heightmap) return;
+        for (int lz = 0; lz < 16; lz++) {
+            for (int lx = 0; lx < 16; lx++) {
+                int highest = -64;
+                for (int ly = 319; ly >= -64; ly--) {
+                    int idx = ((ly + 64) * 256) + (lz * 16) + lx;
+                    if (blocks[idx] != 0) {
+                        highest = ly;
+                        break;
+                    }
+                }
+                out_heightmap[lz * 16 + lx] = (int16_t)highest;
+            }
+        }
+    }
+
+    void GetSection(int section_y, uint16_t* out_blocks) {
+        if (!out_blocks || section_y < -4 || section_y >= 20) return;
+        int base_y = (section_y + 4) * 16;
+        for (int y = 0; y < 16; y++) {
+            int gy = base_y + y;
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    out_blocks[y * 256 + z * 16 + x] = blocks[gy * 256 + z * 16 + x];
+                }
+            }
+        }
+    }
+
+    void GetAllBlocks(uint16_t* out_blocks) {
+        if (!out_blocks) return;
+        std::memcpy(out_blocks, blocks, sizeof(blocks));
+    }
 };
 
 class NOME_CHUNK_API ChunkManager {
@@ -93,6 +129,10 @@ public:
     size_t GetLoadedChunkCount();
     void GetLoadedChunkCoordinates(std::vector<ChunkPos>& out_coords);
 
+    void GetChunkHeightmap(int cx, int cz, int16_t* out_heightmap);
+    void GetChunkSection(int cx, int cz, int section_y, uint16_t* out_blocks);
+    void GetChunkAllBlocks(int cx, int cz, uint16_t* out_blocks);
+
 private:
     ChunkManager() = default;
     int64_t world_seed{1337};
@@ -113,6 +153,9 @@ NOME_CHUNK_API void nome_chunk_load(int cx, int cz);
 NOME_CHUNK_API bool nome_chunk_unload(int cx, int cz, bool force);
 NOME_CHUNK_API uint16_t nome_chunk_get_block(int x, int y, int z);
 NOME_CHUNK_API void nome_chunk_set_block(int x, int y, int z, uint16_t block);
+NOME_CHUNK_API void nome_chunk_get_heightmap(int cx, int cz, int16_t* out_heightmap);
+NOME_CHUNK_API void nome_chunk_get_section(int cx, int cz, int section_y, uint16_t* out_blocks);
+NOME_CHUNK_API void nome_chunk_get_all_blocks(int cx, int cz, uint16_t* out_blocks);
 NOME_CHUNK_API size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf);
 NOME_CHUNK_API size_t nome_chunk_get_loaded_count();
 NOME_CHUNK_API size_t nome_chunk_gc(int max_idle_seconds);

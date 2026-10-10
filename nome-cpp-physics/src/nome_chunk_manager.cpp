@@ -168,6 +168,33 @@ void ChunkManager::GetLoadedChunkCoordinates(std::vector<ChunkPos>& out_coords) 
     }
 }
 
+void ChunkManager::GetChunkHeightmap(int cx, int cz, int16_t* out_heightmap) {
+    auto chunk = GetOrGenerateChunk(cx, cz);
+    if (chunk) {
+        chunk->GetHeightmap(out_heightmap);
+    } else if (out_heightmap) {
+        std::fill_n(out_heightmap, 256, (int16_t)-64);
+    }
+}
+
+void ChunkManager::GetChunkSection(int cx, int cz, int section_y, uint16_t* out_blocks) {
+    auto chunk = GetOrGenerateChunk(cx, cz);
+    if (chunk) {
+        chunk->GetSection(section_y, out_blocks);
+    } else if (out_blocks) {
+        std::fill_n(out_blocks, 4096, (uint16_t)0);
+    }
+}
+
+void ChunkManager::GetChunkAllBlocks(int cx, int cz, uint16_t* out_blocks) {
+    auto chunk = GetOrGenerateChunk(cx, cz);
+    if (chunk) {
+        chunk->GetAllBlocks(out_blocks);
+    } else if (out_blocks) {
+        std::fill_n(out_blocks, 16 * 16 * 384, (uint16_t)0);
+    }
+}
+
 } // namespace nome
 
 extern "C" {
@@ -194,6 +221,18 @@ uint16_t nome_chunk_get_block(int x, int y, int z) {
 
 void nome_chunk_set_block(int x, int y, int z, uint16_t block) {
     nome::ChunkManager::Instance().SetBlock(x, y, z, block);
+}
+
+void nome_chunk_get_heightmap(int cx, int cz, int16_t* out_heightmap) {
+    nome::ChunkManager::Instance().GetChunkHeightmap(cx, cz, out_heightmap);
+}
+
+void nome_chunk_get_section(int cx, int cz, int section_y, uint16_t* out_blocks) {
+    nome::ChunkManager::Instance().GetChunkSection(cx, cz, section_y, out_blocks);
+}
+
+void nome_chunk_get_all_blocks(int cx, int cz, uint16_t* out_blocks) {
+    nome::ChunkManager::Instance().GetChunkAllBlocks(cx, cz, out_blocks);
 }
 
 size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf) {

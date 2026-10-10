@@ -67,23 +67,40 @@ public class SimplePluginManager implements PluginManager {
         }
     }
 
+    public boolean hasListeners(Class<? extends Event> eventClass) {
+        if (handlers.isEmpty() || eventClass == null) return false;
+        for (Map.Entry<Class<? extends Event>, List<RegisteredHandler>> entry : handlers.entrySet()) {
+            if (entry.getKey().isAssignableFrom(eventClass)) {
+                List<RegisteredHandler> list = entry.getValue();
+                if (list != null && !list.isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public void callEvent(Event event) {
-        List<RegisteredHandler> list = handlers.get(event.getClass());
-        if (list == null || list.isEmpty()) return;
-
+        if (event == null || handlers.isEmpty()) return;
+        Class<?> eventClass = event.getClass();
         boolean isCancelled = (event instanceof Cancellable) && ((Cancellable) event).isCancelled();
 
-        for (RegisteredHandler handler : list) {
-            if (isCancelled && handler.ignoreCancelled) continue;
-            try {
-                handler.method.invoke(handler.listener, event);
-                if (event instanceof Cancellable) {
-                    isCancelled = ((Cancellable) event).isCancelled();
+        for (Map.Entry<Class<? extends Event>, List<RegisteredHandler>> entry : handlers.entrySet()) {
+            if (entry.getKey().isAssignableFrom(eventClass)) {
+                List<RegisteredHandler> list = entry.getValue();
+                if (list == null || list.isEmpty()) continue;
+
+                for (RegisteredHandler handler : list) {
+                    if (isCancelled && handler.ignoreCancelled) continue;
+                    try {
+                        handler.method.invoke(handler.listener, event);
+                        if (event instanceof Cancellable) {
+                            isCancelled = ((Cancellable) event).isCancelled();
+                        }
+                    } catch (Throwable t) {
+                        System.err.println("[Nome-PluginManager] Error dispatching event " + event.getEventName() + " to " + handler.plugin.getName());
+                        t.printStackTrace();
+                    }
                 }
-            } catch (Throwable t) {
-                System.err.println("[Nome-PluginManager] Error dispatching event " + event.getEventName() + " to " + handler.plugin.getName());
-                t.printStackTrace();
             }
         }
     }
