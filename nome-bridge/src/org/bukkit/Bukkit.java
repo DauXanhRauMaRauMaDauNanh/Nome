@@ -58,6 +58,8 @@ public final class Bukkit {
     public static boolean isAntiXrayEnabled() { return server.isAntiXrayEnabled(); }
 
     public static boolean isPrimaryThread() { return server.isPrimaryThread(); }
+    public static org.bukkit.command.CommandMap getCommandMap() { return server.getCommandMap(); }
+    public static org.bukkit.command.PluginCommand getPluginCommand(String name) { return server.getPluginCommand(name); }
 
     // 100% Native C++ Crafting Engine Access for Java Plugins
     public static boolean craft2x2(short in0, short in1, short in2, short in3, short[] outResult) {

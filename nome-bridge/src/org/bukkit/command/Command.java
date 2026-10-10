@@ -8,6 +8,7 @@ public abstract class Command {
     private String description = "";
     private String usageMessage = "";
     private String permission = "";
+    private String permissionMessage = "";
     private List<String> aliases = new ArrayList<>();
 
     protected Command(String name) {
@@ -16,6 +17,10 @@ public abstract class Command {
 
     public abstract boolean execute(CommandSender sender, String commandLabel, String[] args);
 
+    public List<String> tabComplete(CommandSender sender, String alias, String[] args) {
+        return java.util.Collections.emptyList();
+    }
+
     public String getName() { return name; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
@@ -23,6 +28,8 @@ public abstract class Command {
     public void setUsage(String usage) { this.usageMessage = usage; }
     public String getPermission() { return permission; }
     public void setPermission(String permission) { this.permission = permission; }
+    public String getPermissionMessage() { return permissionMessage; }
+    public void setPermissionMessage(String permissionMessage) { this.permissionMessage = permissionMessage; }
     public List<String> getAliases() { return aliases; }
     public void setAliases(List<String> aliases) { this.aliases = aliases; }
 }

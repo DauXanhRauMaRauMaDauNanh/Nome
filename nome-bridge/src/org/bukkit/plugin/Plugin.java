@@ -17,4 +17,10 @@ public interface Plugin {
     Logger getLogger();
     Server getServer();
     boolean onCommand(CommandSender sender, Command command, String label, String[] args);
+    org.bukkit.configuration.file.FileConfiguration getConfig();
+    void reloadConfig();
+    void saveConfig();
+    void saveDefaultConfig();
+    void saveResource(String resourcePath, boolean replace);
+    java.io.InputStream getResource(String filename);
 }

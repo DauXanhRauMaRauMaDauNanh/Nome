@@ -46,4 +46,7 @@ public interface Server {
     boolean isAntiXrayEnabled();
 
     boolean isPrimaryThread();
+    org.bukkit.command.CommandMap getCommandMap();
+    org.bukkit.command.PluginCommand getPluginCommand(String name);
+    ConsoleCommandSender getConsoleSender();
 }

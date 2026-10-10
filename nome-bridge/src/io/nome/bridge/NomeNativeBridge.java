@@ -63,6 +63,8 @@ public final class NomeNativeBridge {
     private static MethodHandle hChunkGetAllBlocks;
     private static MethodHandle hChunkGetHeightmap;
     private static MethodHandle hChunkGetSection;
+    private static MethodHandle hChunkSave;
+    private static MethodHandle hChunkSaveAll;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -178,6 +180,12 @@ public final class NomeNativeBridge {
 
             hChunkGetSection = linker.downcallHandle(lookup.find("nome_native_chunk_get_section").orElseThrow(),
                     FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+            hChunkSave = linker.downcallHandle(lookup.find("nome_native_chunk_save").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+
+            hChunkSaveAll = linker.downcallHandle(lookup.find("nome_native_chunk_save_all").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_LONG));
 
             // Register Java EventBridge Upcalls into C++ Engine (8 stubs)
             hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
@@ -656,6 +664,24 @@ public final class NomeNativeBridge {
             MemorySegment.copy(seg, ValueLayout.JAVA_SHORT, 0, outSection, 0, 4096);
         } catch (Throwable t) {
             t.printStackTrace();
+        }
+    }
+
+    public static boolean saveChunk(int cx, int cz) {
+        if (!initialized || hChunkSave == null) return false;
+        try {
+            return (boolean) hChunkSave.invokeExact(cx, cz);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static long saveAllChunks() {
+        if (!initialized || hChunkSaveAll == null) return 0;
+        try {
+            return (long) hChunkSaveAll.invokeExact();
+        } catch (Throwable t) {
+            return 0;
         }
     }
 

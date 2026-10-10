@@ -133,6 +133,9 @@ public:
     void GetChunkSection(int cx, int cz, int section_y, uint16_t* out_blocks);
     void GetChunkAllBlocks(int cx, int cz, uint16_t* out_blocks);
 
+    bool SaveChunk(int cx, int cz);
+    size_t SaveAllChunks();
+
 private:
     ChunkManager() = default;
     int64_t world_seed{1337};
@@ -159,6 +162,8 @@ NOME_CHUNK_API void nome_chunk_get_all_blocks(int cx, int cz, uint16_t* out_bloc
 NOME_CHUNK_API size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf);
 NOME_CHUNK_API size_t nome_chunk_get_loaded_count();
 NOME_CHUNK_API size_t nome_chunk_gc(int max_idle_seconds);
+NOME_CHUNK_API bool nome_chunk_save(int cx, int cz);
+NOME_CHUNK_API size_t nome_chunk_save_all();
 
 #ifdef __cplusplus
 }

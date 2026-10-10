@@ -172,7 +172,13 @@ NOME_EXPORT bool nome_native_init() {
         
         // Initialize multi-chunk manager and procedural terrain generator
         nome_chunk_init(1337);
-        nome_chunk_load(0, 0);
+        // Preload and pin 49 spawn chunks (-3 to +3 in X and Z)
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                nome_chunk_load(dx, dz);
+                nome::ChunkManager::Instance().AddTicket(dx, dz);
+            }
+        }
 
         // Spawn initial vanilla mobs (Villager, Cow, Sheep, Zombie) into native ECS
         nome::EntityManager::Instance().Spawn(nome::ENTITY_VILLAGER, 8.5, 65.0, 8.5);
@@ -220,7 +226,17 @@ NOME_EXPORT void nome_native_stop() {
         if (g_server->network) {
             nome_net_stop(g_server->network);
         }
+        // Flush all chunks to disk on server stop
+        nome_chunk_save_all();
     }
+}
+
+NOME_EXPORT bool nome_native_chunk_save(int cx, int cz) {
+    return nome_chunk_save(cx, cz);
+}
+
+NOME_EXPORT size_t nome_native_chunk_save_all() {
+    return nome_chunk_save_all();
 }
 
 NOME_EXPORT void nome_register_java_callbacks(NomeOnPlayerJoinFn on_join,

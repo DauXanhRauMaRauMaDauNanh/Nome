@@ -274,8 +274,9 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     int fd = c->socket_fd;
     uint8_t b_false = 0;
     uint8_t b_true = 1;
+    bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
 
-    // 1. Packet 0x2C / 0x28: Login (Play)
+    // 1. Packet Login (Play): 0x33 for 26.3 / 1.21+, 0x2C for 1.20.4
     NomePacketBuffer *bLogin = nome_buffer_create(512);
     int32_t entity_id = 1000 + fd;
     nome_buffer_write(bLogin, (const uint8_t*)&entity_id, 4);
@@ -293,65 +294,131 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     // reduced debug info (false), do respawn screen (true), do limited craft (false)
     uint8_t flags[3] = {0, 1, 0};
     nome_buffer_write(bLogin, flags, 3);
-    // dimension type string
-    nome_buffer_write_string(bLogin, "minecraft:overworld");
-    nome_buffer_write_string(bLogin, "minecraft:overworld");
-    // hashed seed (8 bytes)
-    uint8_t seed[8] = {0};
-    nome_buffer_write(bLogin, seed, 8);
-    // game mode: 0 (survival)
-    uint8_t gm = 0;
-    nome_buffer_write(bLogin, &gm, 1);
-    // prev game mode: -1
-    int8_t pgm = -1;
-    nome_buffer_write(bLogin, (const uint8_t*)&pgm, 1);
-    // is_debug (false), is_flat (false)
-    nome_buffer_write(bLogin, flags, 2);
-    // death location (has_death_location false)
-    nome_buffer_write(bLogin, &b_false, 1);
-    // portal cooldown = 0
-    nome_buffer_write_varint(bLogin, 0);
 
-    send_raw_packet(fd, 0x2C, bLogin->data, bLogin->write_pos);
+    if (modern) {
+        // Modern 26.3 / 1.21+ CommonPlayerSpawnInfo:
+        // 1. dimensionType (VarInt = 0)
+        nome_buffer_write_varint(bLogin, 0);
+        // 2. dimension ("minecraft:overworld")
+        nome_buffer_write_string(bLogin, "minecraft:overworld");
+        // 3. hashed seed (8 bytes long)
+        uint8_t seed[8] = {0};
+        nome_buffer_write(bLogin, seed, 8);
+        // 4. gameType (byte 0 = survival)
+        uint8_t gm = 0;
+        nome_buffer_write(bLogin, &gm, 1);
+        // 5. previousGameType (OPTIONAL_VAR_INT: 0 = empty)
+        nome_buffer_write_varint(bLogin, 0);
+        // 6. isDebug (false), 7. isFlat (false)
+        nome_buffer_write(bLogin, flags, 2);
+        // 8. lastDeathLocation (has_death_location false = 0)
+        nome_buffer_write(bLogin, &b_false, 1);
+        // 9. portalCooldown = 0 (VarInt)
+        nome_buffer_write_varint(bLogin, 0);
+        // 10. seaLevel = 63 (VarInt)
+        nome_buffer_write_varint(bLogin, 63);
+        // enforcesSecureChat = false, onlineMode = false
+        nome_buffer_write(bLogin, &b_false, 1);
+        nome_buffer_write(bLogin, &b_false, 1);
+
+        send_raw_packet(fd, 0x33, bLogin->data, bLogin->write_pos);
+    } else {
+        // Legacy 1.20.4 Login Packet
+        nome_buffer_write_string(bLogin, "minecraft:overworld");
+        nome_buffer_write_string(bLogin, "minecraft:overworld");
+        uint8_t seed[8] = {0};
+        nome_buffer_write(bLogin, seed, 8);
+        uint8_t gm = 0;
+        nome_buffer_write(bLogin, &gm, 1);
+        int8_t pgm = -1;
+        nome_buffer_write(bLogin, (const uint8_t*)&pgm, 1);
+        nome_buffer_write(bLogin, flags, 2);
+        nome_buffer_write(bLogin, &b_false, 1);
+        nome_buffer_write_varint(bLogin, 0);
+
+        send_raw_packet(fd, 0x29, bLogin->data, bLogin->write_pos);
+    }
     nome_buffer_free(bLogin);
 
-    // 2. Packet 0x5A: Set Default Spawn Position (0, 64, 0, 0.0f)
-    NomePacketBuffer *bSpawn = nome_buffer_create(64);
-    uint64_t pos_encoded = (((uint64_t)0 & 0x3FFFFFF) << 38) | (((uint64_t)0 & 0x3FFFFFF) << 12) | ((uint64_t)64 & 0xFFF);
-    uint8_t pos_bytes[8];
-    for (int i = 0; i < 8; i++) pos_bytes[7 - i] = (uint8_t)(pos_encoded >> (i * 8));
-    nome_buffer_write(bSpawn, pos_bytes, 8);
-    float angle = 0.0f;
-    nome_buffer_write(bSpawn, (const uint8_t*)&angle, 4);
-    send_raw_packet(fd, 0x5A, bSpawn->data, bSpawn->write_pos);
-    nome_buffer_free(bSpawn);
+    // 2. Set Chunk Cache Center: 0x61 for 26.3, 0x52 for 1.20.4
+    {
+        NomePacketBuffer *bCenter = nome_buffer_create(16);
+        nome_buffer_write_varint(bCenter, 0);
+        nome_buffer_write_varint(bCenter, 0);
+        send_raw_packet(fd, modern ? 0x61 : 0x52, bCenter->data, bCenter->write_pos);
+        nome_buffer_free(bCenter);
+    }
 
-    // 3. Packet 0x40: Synchronize Player Position (X=0.5, Y=65.0, Z=0.5)
-    NomePacketBuffer *bPos = nome_buffer_create(64);
-    double px = 0.5, py = 65.0, pz = 0.5;
-    float yaw = 0.0f, pitch = 0.0f;
-    nome_buffer_write(bPos, (const uint8_t*)&px, 8);
-    nome_buffer_write(bPos, (const uint8_t*)&py, 8);
-    nome_buffer_write(bPos, (const uint8_t*)&pz, 8);
-    nome_buffer_write(bPos, (const uint8_t*)&yaw, 4);
-    nome_buffer_write(bPos, (const uint8_t*)&pitch, 4);
-    uint8_t rel_flags = 0;
-    nome_buffer_write(bPos, &rel_flags, 1);
-    nome_buffer_write_varint(bPos, 1); // teleport id
-    send_raw_packet(fd, 0x40, bPos->data, bPos->write_pos);
-    nome_buffer_free(bPos);
+    // 3. Set Default Spawn Position: 0x64 for 26.3, 0x54 for 1.20.4
+    {
+        NomePacketBuffer *bSpawn = nome_buffer_create(64);
+        uint64_t pos_encoded = (((uint64_t)0 & 0x3FFFFFF) << 38) | (((uint64_t)0 & 0x3FFFFFF) << 12) | ((uint64_t)64 & 0xFFF);
+        uint8_t pos_bytes[8];
+        for (int i = 0; i < 8; i++) pos_bytes[7 - i] = (uint8_t)(pos_encoded >> (i * 8));
 
-    // 4. Initialize Smart Chunk Streaming (View distance 4 spiral queue)
+        if (modern) {
+            // RespawnData: dimension string, BlockPos, yaw float, pitch float
+            nome_buffer_write_string(bSpawn, "minecraft:overworld");
+            nome_buffer_write(bSpawn, pos_bytes, 8);
+            float yaw = 0.0f, pitch = 0.0f;
+            nome_buffer_write(bSpawn, (const uint8_t*)&yaw, 4);
+            nome_buffer_write(bSpawn, (const uint8_t*)&pitch, 4);
+            send_raw_packet(fd, 0x64, bSpawn->data, bSpawn->write_pos);
+        } else {
+            nome_buffer_write(bSpawn, pos_bytes, 8);
+            float angle = 0.0f;
+            nome_buffer_write(bSpawn, (const uint8_t*)&angle, 4);
+            send_raw_packet(fd, 0x54, bSpawn->data, bSpawn->write_pos);
+        }
+        nome_buffer_free(bSpawn);
+    }
+
+    // 4. Synchronize Player Position: 0x4A for 26.3, 0x3E for 1.20.4
+    {
+        NomePacketBuffer *bPos = nome_buffer_create(128);
+        double px = 0.5, py = 65.0, pz = 0.5;
+        float yaw = 0.0f, pitch = 0.0f;
+        if (modern) {
+            // 26.3: Teleport ID VarInt, 3 doubles pos, 3 doubles delta, 2 floats rot, 4 bytes int rel mask
+            nome_buffer_write_varint(bPos, 1);
+            nome_buffer_write(bPos, (const uint8_t*)&px, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&py, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&pz, 8);
+            double zero_d = 0.0;
+            nome_buffer_write(bPos, (const uint8_t*)&zero_d, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&zero_d, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&zero_d, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&yaw, 4);
+            nome_buffer_write(bPos, (const uint8_t*)&pitch, 4);
+            int32_t rel_mask = 0;
+            nome_buffer_write(bPos, (const uint8_t*)&rel_mask, 4);
+            send_raw_packet(fd, 0x4A, bPos->data, bPos->write_pos);
+        } else {
+            nome_buffer_write(bPos, (const uint8_t*)&px, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&py, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&pz, 8);
+            nome_buffer_write(bPos, (const uint8_t*)&yaw, 4);
+            nome_buffer_write(bPos, (const uint8_t*)&pitch, 4);
+            uint8_t rel_flags = 0;
+            nome_buffer_write(bPos, &rel_flags, 1);
+            nome_buffer_write_varint(bPos, 1);
+            send_raw_packet(fd, 0x3E, bPos->data, bPos->write_pos);
+        }
+        nome_buffer_free(bPos);
+    }
+
+    // 5. Initialize Smart Chunk Streaming (View distance 4 spiral queue)
     c->view_distance = 4;
     c->current_chunk_x = 0;
     c->current_chunk_z = 0;
     nome_net_queue_spiral_chunks(c, 0, 0, c->view_distance);
 
-    // Immediately send center chunk (0, 0)
+    // Immediately send center chunk (0, 0): 0x2F for 26.3, 0x25 for 1.20.4
     static uint8_t chunk_payload[65536];
     size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload));
     if (chunk_len > 0) {
-        send_raw_packet(fd, 0x27, chunk_payload, chunk_len);
+        int chunk_pkt_id = modern ? 0x2F : 0x25;
+        send_raw_packet(fd, chunk_pkt_id, chunk_payload, chunk_len);
         c->pending_chunk_head = 1; // Center sent, rest streams per tick
     }
 }
@@ -378,6 +445,7 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
         if (c->state == NOME_STATE_HANDSHAKE && packet_id == 0x00) {
             int32_t proto = 0;
             int offset = nome_varint_decode(payload, payload_len, &proto);
+            c->protocol_version = proto;
             int32_t host_len = 0;
             offset += nome_varint_decode(payload + offset, payload_len - offset, &host_len);
             offset += host_len;
@@ -403,7 +471,7 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
             }
         } else if (c->state == NOME_STATE_LOGIN) {
             if (packet_id == 0x00) {
-                // Login Start
+                // Login Start (ServerboundHelloPacket)
                 int32_t name_len = 0;
                 int off = nome_varint_decode(payload, payload_len, &name_len);
                 if (name_len > 0 && (size_t)name_len < sizeof(c->username)) {
@@ -411,22 +479,50 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     c->username[name_len] = '\0';
                 }
 
-                // Send Login Success (0x02)
+                // Send Login Finished (0x02)
                 NomePacketBuffer *pbuf = nome_buffer_create(256);
                 uint8_t zero_uuid[16] = {0};
-                nome_buffer_write(pbuf, zero_uuid, 16);
-                nome_buffer_write_string(pbuf, c->username);
+                nome_buffer_write(pbuf, zero_uuid, 16); // GameProfile UUID
+                nome_buffer_write_string(pbuf, c->username); // GameProfile Name
                 nome_buffer_write_varint(pbuf, 0); // 0 properties
+
+                // Modern 26.3 / 1.21+ has UUID sessionId in ClientboundLoginFinishedPacket
+                if (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0) {
+                    nome_buffer_write(pbuf, zero_uuid, 16); // sessionId UUID
+                }
+
                 send_raw_packet(c->socket_fd, 0x02, pbuf->data, pbuf->write_pos);
                 nome_buffer_free(pbuf);
 
+                // Legacy protocol (< 1.20.2) transitions directly to PLAY
+                if (c->protocol_version > 0 && c->protocol_version < 764) {
+                    c->state = NOME_STATE_PLAY;
+                    if (net->on_join) {
+                        net->on_join((uint64_t)c->socket_fd, c->username);
+                    }
+                    send_full_play_sequence(net, c);
+                }
+            } else if (packet_id == 0x03) {
+                // ServerboundLoginAcknowledgedPacket (0x03) -> Switch to CONFIGURATION state
+                c->state = NOME_STATE_CONFIGURATION;
+
+                // Send ClientboundFinishConfigurationPacket (0x03 for 26.3, 0x02 for 1.20.4)
+                int finish_id = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0) ? 0x03 : 0x02;
+                send_raw_packet(c->socket_fd, finish_id, NULL, 0);
+            }
+        } else if (c->state == NOME_STATE_CONFIGURATION) {
+            // Configuration State handling
+            int finish_id = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0) ? 0x03 : 0x02;
+            if (packet_id == finish_id || packet_id == 0x02 || packet_id == 0x03) {
+                // ServerboundFinishConfigurationPacket -> Complete handshake & enter PLAY state!
                 c->state = NOME_STATE_PLAY;
                 if (net->on_join) {
                     net->on_join((uint64_t)c->socket_fd, c->username);
                 }
-
-                // Send complete Play Game Sequence
                 send_full_play_sequence(net, c);
+            } else if (packet_id == 0x00 || packet_id == 0x07) {
+                // Client Information (0x00) or Select Known Packs (0x07) -> Send Finish Configuration
+                send_raw_packet(c->socket_fd, finish_id, NULL, 0);
             }
         } else if (c->state == NOME_STATE_PLAY) {
             // Universal Packet Interception Hook for Anticheat & ProtocolLib
@@ -796,13 +892,15 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
         if (c->is_active && c->state == NOME_STATE_PLAY && c->pending_chunk_head < c->pending_chunk_count) {
             int sent_this_poll = 0;
             static uint8_t chunk_payload[65536];
+            bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
+            int chunk_pkt_id = modern ? 0x2F : 0x25;
             while (c->pending_chunk_head < c->pending_chunk_count && sent_this_poll < 2) {
                 int cx = c->pending_chunk_x[c->pending_chunk_head];
                 int cz = c->pending_chunk_z[c->pending_chunk_head];
                 c->pending_chunk_head++;
                 size_t chunk_len = nome_chunk_serialize(cx, cz, chunk_payload, sizeof(chunk_payload));
                 if (chunk_len > 0) {
-                    send_raw_packet(c->socket_fd, 0x27, chunk_payload, chunk_len);
+                    send_raw_packet(c->socket_fd, chunk_pkt_id, chunk_payload, chunk_len);
                     sent_this_poll++;
                 }
             }
@@ -823,7 +921,9 @@ void nome_net_broadcast_chat(NomeServerNetwork *net, const char *message) {
             nome_buffer_write_string(buf, json_msg);
             uint8_t overlay = 0;
             nome_buffer_write(buf, &overlay, 1);
-            send_raw_packet(net->clients[i].socket_fd, 0x69, buf->data, buf->write_pos);
+            bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
+            int chat_pkt_id = modern ? 0x7D : 0x69;
+            send_raw_packet(net->clients[i].socket_fd, chat_pkt_id, buf->data, buf->write_pos);
             nome_buffer_free(buf);
         }
     }
@@ -839,16 +939,34 @@ void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x
             net->clients[i].yaw = yaw;
             net->clients[i].pitch = pitch;
 
-            NomePacketBuffer *buf = nome_buffer_create(64);
-            nome_buffer_write(buf, (const uint8_t*)&x, 8);
-            nome_buffer_write(buf, (const uint8_t*)&y, 8);
-            nome_buffer_write(buf, (const uint8_t*)&z, 8);
-            nome_buffer_write(buf, (const uint8_t*)&yaw, 4);
-            nome_buffer_write(buf, (const uint8_t*)&pitch, 4);
-            uint8_t rel_flags = 0;
-            nome_buffer_write(buf, &rel_flags, 1);
-            nome_buffer_write_varint(buf, 2); // teleport id
-            send_raw_packet(net->clients[i].socket_fd, 0x40, buf->data, buf->write_pos);
+            bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
+            NomePacketBuffer *buf = nome_buffer_create(128);
+            if (modern) {
+                // 26.3 ClientboundPlayerPositionPacket (0x4A)
+                nome_buffer_write_varint(buf, 2); // teleport id
+                nome_buffer_write(buf, (const uint8_t*)&x, 8);
+                nome_buffer_write(buf, (const uint8_t*)&y, 8);
+                nome_buffer_write(buf, (const uint8_t*)&z, 8);
+                double zero_d = 0.0;
+                nome_buffer_write(buf, (const uint8_t*)&zero_d, 8);
+                nome_buffer_write(buf, (const uint8_t*)&zero_d, 8);
+                nome_buffer_write(buf, (const uint8_t*)&zero_d, 8);
+                nome_buffer_write(buf, (const uint8_t*)&yaw, 4);
+                nome_buffer_write(buf, (const uint8_t*)&pitch, 4);
+                int32_t rel_mask = 0;
+                nome_buffer_write(buf, (const uint8_t*)&rel_mask, 4);
+                send_raw_packet(net->clients[i].socket_fd, 0x4A, buf->data, buf->write_pos);
+            } else {
+                nome_buffer_write(buf, (const uint8_t*)&x, 8);
+                nome_buffer_write(buf, (const uint8_t*)&y, 8);
+                nome_buffer_write(buf, (const uint8_t*)&z, 8);
+                nome_buffer_write(buf, (const uint8_t*)&yaw, 4);
+                nome_buffer_write(buf, (const uint8_t*)&pitch, 4);
+                uint8_t rel_flags = 0;
+                nome_buffer_write(buf, &rel_flags, 1);
+                nome_buffer_write_varint(buf, 2); // teleport id
+                send_raw_packet(net->clients[i].socket_fd, 0x3E, buf->data, buf->write_pos);
+            }
             nome_buffer_free(buf);
             break;
         }

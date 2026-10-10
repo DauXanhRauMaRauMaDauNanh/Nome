@@ -15,6 +15,12 @@ node_modules/
 extracted_vanilla_data/
 META-INF/
 
+# Runtime and world data
+world/
+logs/
+cache_26_3/
+game_protocols.txt
+
 # OS and IDE files
 .idea/
 .vscode/

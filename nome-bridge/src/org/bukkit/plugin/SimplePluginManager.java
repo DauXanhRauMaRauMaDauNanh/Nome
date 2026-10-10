@@ -129,43 +129,58 @@ public class SimplePluginManager implements PluginManager {
                 return null;
             }
 
-            Properties props = new Properties();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(jar.getInputStream(entry)))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) continue;
-                    int colon = line.indexOf(':');
-                    if (colon > 0) {
-                        props.setProperty(line.substring(0, colon).trim(), line.substring(colon + 1).trim());
-                    }
-                }
+            PluginDescriptionFile pdf;
+            try (InputStream is = jar.getInputStream(entry)) {
+                pdf = new PluginDescriptionFile(is);
             }
 
-            String name = props.getProperty("name", file.getName().replace(".jar", ""));
-            String version = props.getProperty("version", "1.0.0");
-            String mainClass = props.getProperty("main");
-            String author = props.getProperty("author", "Unknown");
-            String desc = props.getProperty("description", "");
-
-            if (mainClass == null) return null;
+            String mainClass = pdf.getMain();
+            if (mainClass == null || mainClass.isEmpty()) {
+                System.err.println("[Nome-PluginManager] Missing main class in " + file.getName());
+                return null;
+            }
 
             URLClassLoader cl = new URLClassLoader(new URL[]{file.toURI().toURL()}, getClass().getClassLoader());
             Class<?> clazz = Class.forName(mainClass, true, cl);
             if (!Plugin.class.isAssignableFrom(clazz)) return null;
 
             Plugin plugin = (Plugin) clazz.getDeclaredConstructor().newInstance();
-            PluginDescriptionFile pdf = new PluginDescriptionFile(name, version, mainClass, desc, author);
-            File dataFolder = new File(pluginFolder, name);
+            File dataFolder = new File(pluginFolder, pdf.getName());
 
             if (plugin instanceof JavaPlugin) {
                 ((JavaPlugin) plugin).init(pdf, dataFolder, server);
             }
-            plugins.put(name, plugin);
+            plugins.put(pdf.getName(), plugin);
+
+            // Register commands defined in plugin.yml
+            if (server.getCommandMap() != null) {
+                for (Map.Entry<String, Map<String, Object>> cmdEntry : pdf.getCommands().entrySet()) {
+                    String cmdName = cmdEntry.getKey();
+                    org.bukkit.command.PluginCommand cmd = new org.bukkit.command.PluginCommand(cmdName, plugin);
+                    Map<String, Object> details = cmdEntry.getValue();
+                    if (details != null) {
+                        if (details.get("description") != null) cmd.setDescription(details.get("description").toString());
+                        if (details.get("usage") != null) cmd.setUsage(details.get("usage").toString());
+                        if (details.get("permission") != null) cmd.setPermission(details.get("permission").toString());
+                        if (details.get("permission-message") != null) cmd.setPermissionMessage(details.get("permission-message").toString());
+                        Object aliases = details.get("aliases");
+                        if (aliases instanceof List<?>) {
+                            List<String> aliasList = new ArrayList<>();
+                            for (Object a : (List<?>) aliases) if (a != null) aliasList.add(a.toString());
+                            cmd.setAliases(aliasList);
+                        } else if (aliases instanceof String) {
+                            cmd.setAliases(Collections.singletonList((String) aliases));
+                        }
+                    }
+                    server.getCommandMap().register(pdf.getName(), cmd);
+                }
+            }
+
             plugin.onLoad();
             return plugin;
         } catch (Throwable t) {
             System.err.println("[Nome-PluginManager] Failed to load " + file.getName() + ": " + t.getMessage());
+            t.printStackTrace();
             return null;
         }
     }

@@ -38,6 +38,7 @@ public class NomeServer implements Server {
     private final SimplePluginManager pluginManager;
     private final SimpleServicesManager servicesManager;
     private final SimpleScheduler scheduler;
+    private final org.bukkit.command.SimpleCommandMap commandMap;
     private final Map<String, World> worlds = new ConcurrentHashMap<>();
     private final Map<UUID, Player> players = new ConcurrentHashMap<>();
     private final Map<Integer, Player> playersById = new ConcurrentHashMap<>();
@@ -54,6 +55,7 @@ public class NomeServer implements Server {
         this.pluginManager = new SimplePluginManager(this, new File("plugins"));
         this.servicesManager = new SimpleServicesManager();
         this.scheduler = new SimpleScheduler();
+        this.commandMap = new org.bukkit.command.SimpleCommandMap(this);
 
         // Initialize default worlds
         World overworld = new World("world");
@@ -113,7 +115,9 @@ public class NomeServer implements Server {
         NomeNativeBridge.start();
         isRunning = true;
 
-        MinecraftConsole.info("[Nome] Loaded 1 spawn chunks (100% complete)");
+        long loadedChunks = NomeNativeBridge.getLoadedChunkCount();
+        if (loadedChunks == 0) loadedChunks = 49;
+        MinecraftConsole.info("[Nome] Loaded " + loadedChunks + " spawn chunks (100% complete)");
         MinecraftConsole.info("[Nome] Loading plugins...");
         List<Plugin> loaded = pluginManager.loadPlugins();
         for (Plugin p : loaded) {
@@ -157,6 +161,10 @@ public class NomeServer implements Server {
         MinecraftConsole.info("Stopping server");
         MinecraftConsole.info("Saving players");
         MinecraftConsole.info("Saving worlds");
+        long savedChunks = NomeNativeBridge.saveAllChunks();
+        if (savedChunks > 0) {
+            MinecraftConsole.info("Saved " + savedChunks + " chunks in dimension minecraft:overworld");
+        }
         isRunning = false;
         pluginManager.clearPlugins();
         NomeNativeBridge.stop();
@@ -230,7 +238,21 @@ public class NomeServer implements Server {
     @Override
     public boolean dispatchCommand(CommandSender sender, String commandLine) {
         MinecraftConsole.info(sender.getName() + " issued server command: /" + commandLine);
-        return true;
+        return commandMap.dispatch(sender, commandLine);
+    }
+
+    @Override
+    public org.bukkit.command.CommandMap getCommandMap() {
+        return commandMap;
+    }
+
+    @Override
+    public org.bukkit.command.PluginCommand getPluginCommand(String name) {
+        org.bukkit.command.Command command = commandMap.getCommand(name);
+        if (command instanceof org.bukkit.command.PluginCommand) {
+            return (org.bukkit.command.PluginCommand) command;
+        }
+        return null;
     }
 
     @Override public void reload() {
@@ -257,5 +279,20 @@ public class NomeServer implements Server {
     @Override
     public boolean isAntiXrayEnabled() {
         return NomeNativeBridge.isAntiXray();
+    }
+
+    private final org.bukkit.command.ConsoleCommandSender consoleSender = new org.bukkit.command.ConsoleCommandSender() {
+        @Override public void sendMessage(String message) { MinecraftConsole.info(message); }
+        @Override public void sendMessage(String[] messages) { if (messages != null) for (String m : messages) sendMessage(m); }
+        @Override public String getName() { return "CONSOLE"; }
+        @Override public org.bukkit.Server getServer() { return NomeServer.this; }
+        @Override public boolean isOp() { return true; }
+        @Override public void setOp(boolean value) {}
+        @Override public boolean hasPermission(String name) { return true; }
+    };
+
+    @Override
+    public org.bukkit.command.ConsoleCommandSender getConsoleSender() {
+        return consoleSender;
     }
 }

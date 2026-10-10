@@ -46,6 +46,10 @@ Copy-Item "C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll" "./bin/native/libgcc_s_seh-1
 Write-Host "[2/4] Compiling Java Bootstrap & Full Bukkit/Paper API Surface (Nome.jar)..." -ForegroundColor Yellow
 $javaSrc = Get-ChildItem -Path "nome-bridge\src", "nome-bootstrap\src" -Recurse -Filter "*.java" | Select-Object -ExpandProperty FullName
 javac -d target/classes $javaSrc
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Java compilation failed!" -ForegroundColor Red
+    exit 1
+}
 
 # Package standalone Fat JAR with bundled native DLLs!
 jar --create --file Nome.jar --main-class io.nome.bootstrap.Main -C target/classes .

@@ -59,6 +59,7 @@ typedef enum NomeConnState {
 typedef struct NomeClientSession {
     int socket_fd;
     NomeConnState state;
+    int protocol_version;
     char username[32];
     uint64_t uuid_most;
     uint64_t uuid_least;
