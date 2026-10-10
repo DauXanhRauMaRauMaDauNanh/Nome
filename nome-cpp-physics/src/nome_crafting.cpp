@@ -259,6 +259,56 @@ void CraftingManager::InitVanillaRecipes() {
     RegisterShaped(3, 3, {265, 0, 265,
                           265, 280, 265,
                           265, 0, 265}, 66, 16);
+
+    // ----------------------------------------------------
+    // 7. MINECRAFT 26.3 NEW FEATURES & EXPLORATION
+    // ----------------------------------------------------
+    // Straw Bed (211): 3 Hay Blocks (170) [3x1] -> 4 Straw Beds
+    RegisterShaped(3, 1, {170, 170, 170}, 211, 4);
+
+    // Wool Slabs: 3 Wool -> 6 Wool Slabs
+    // White Wool Slab (214): 3 White Wool (35) [3x1] -> 6
+    RegisterShaped(3, 1, {35, 35, 35}, 214, 6);
+    // Red Wool Slab (215): 3 Red Wool (36) [3x1] -> 6
+    RegisterShaped(3, 1, {36, 36, 36}, 215, 6);
+
+    // Cushions: 3 Wool Slabs -> 1 Cushion
+    // Cushion (212): 3 Wool Slabs (214) [3x1] -> 1
+    RegisterShaped(3, 1, {214, 214, 214}, 212, 1);
+    // Red Cushion (213): 3 Red Wool Slabs (215) [3x1] -> 1
+    RegisterShaped(3, 1, {215, 215, 215}, 213, 1);
+
+    // Wool Stairs: 6 Wool [3x3 stair] -> 4 Wool Stairs
+    RegisterShaped(3, 3, {35, 0, 0,
+                          35, 35, 0,
+                          35, 35, 35}, 216, 4, true);
+    RegisterShaped(3, 3, {36, 0, 0,
+                          36, 36, 0,
+                          36, 36, 36}, 217, 4, true);
+
+    // Campfire (210): 3 Sticks (280) + 1 Coal (263) + 3 Logs (17) [3x3] -> 1 Campfire
+    RegisterShaped(3, 3, {0, 280, 0,
+                          280, 263, 280,
+                          17, 17, 17}, 210, 1);
+
+    // Poplar Planks from Poplar Log (220) -> 4 Planks (5)
+    RegisterShapeless({220}, 5, 4);
+
+    // Explorer / Empty Map (395): 8 Paper (339) + 1 Compass (345)
+    RegisterShaped(3, 3, {339, 339, 339,
+                          339, 345, 339,
+                          339, 339, 339}, 395, 1);
+
+    // Compass (345): 4 Iron Ingots (265) + 1 Redstone (331)
+    RegisterShaped(3, 3, {0, 265, 0,
+                          265, 331, 265,
+                          0, 265, 0}, 345, 1);
+
+    // Redstone Torch (76): 1 Redstone (331) + 1 Stick (280)
+    RegisterShaped(1, 2, {331, 280}, 76, 1);
+
+    // Lever (69): 1 Stick (280) + 1 Cobblestone (4)
+    RegisterShaped(1, 2, {280, 4}, 69, 1);
 }
 
 bool CraftingManager::MatchGrid(const uint16_t* grid, uint8_t grid_dim, uint16_t* out_item, uint8_t* out_count) const {

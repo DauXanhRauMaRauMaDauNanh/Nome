@@ -71,6 +71,11 @@ enum BlockId : uint16_t {
     BLOCK_END_PORTAL_FRAME = 120,
     BLOCK_EMERALD_ORE = 129,
     BLOCK_TERRACOTTA = 159,
+    BLOCK_WHITE_WOOL = 35,
+    BLOCK_RED_WOOL = 36,
+    BLOCK_BROWN_MUSHROOM = 39,
+    BLOCK_RED_MUSHROOM = 40,
+    BLOCK_HAY_BLOCK = 170,
     
     // Deepslate Ore variants (Y < 0)
     BLOCK_DEEPSLATE_COAL_ORE = 201,
@@ -80,7 +85,26 @@ enum BlockId : uint16_t {
     BLOCK_DEEPSLATE_REDSTONE_ORE = 205,
     BLOCK_DEEPSLATE_LAPIS_ORE = 206,
     BLOCK_DEEPSLATE_DIAMOND_ORE = 207,
-    BLOCK_DEEPSLATE_EMERALD_ORE = 208
+    BLOCK_DEEPSLATE_EMERALD_ORE = 208,
+
+    // Minecraft 26.3 New Blocks & Features
+    BLOCK_CAMPFIRE = 210,
+    BLOCK_STRAW_BED = 211,
+    BLOCK_CUSHION = 212,
+    BLOCK_RED_CUSHION = 213,
+    BLOCK_WOOL_SLAB = 214,
+    BLOCK_RED_WOOL_SLAB = 215,
+    BLOCK_WOOL_STAIRS = 216,
+    BLOCK_RED_WOOL_STAIRS = 217,
+    BLOCK_CONCRETE_SLAB = 218,
+    BLOCK_CONCRETE_STAIRS = 219,
+    BLOCK_POPLAR_LOG = 220,
+    BLOCK_POPLAR_LEAVES = 221,
+    BLOCK_RED_POPLAR_LEAVES = 222,
+    BLOCK_ORANGE_POPLAR_LEAVES = 223,
+    BLOCK_YELLOW_POPLAR_LEAVES = 224,
+    BLOCK_SHELF_MUSHROOM = 225,
+    BLOCK_RED_SHRUB = 226
 };
 
 // Full 16x16x384 Chunk Generator (Height -64 to 319 = 384 blocks total)
@@ -108,6 +132,7 @@ private:
     void StampMineshaft(int chunk_x, int chunk_z, uint16_t* blocks);
     void StampDesertPyramid(int chunk_x, int chunk_z, uint16_t* blocks);
     void StampStronghold(int chunk_x, int chunk_z, uint16_t* blocks);
+    void StampAbandonedCamp(int chunk_x, int chunk_z, uint16_t* blocks);
 };
 
 } // namespace nome

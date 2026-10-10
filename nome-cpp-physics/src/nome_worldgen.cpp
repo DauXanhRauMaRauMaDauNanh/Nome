@@ -288,8 +288,8 @@ void ChunkGenerator::GenerateVanillaOres(int chunk_x, int chunk_z, uint16_t* blo
 }
 
 void ChunkGenerator::GenerateVegetation(int chunk_x, int chunk_z, uint16_t* blocks) {
-    for (int z = 3; z < 13; z++) {
-        for (int x = 3; x < 13; x++) {
+    for (int z = 2; z < 14; z++) {
+        for (int x = 2; x < 14; x++) {
             double wx = (double)(chunk_x * 16 + x);
             double wz = (double)(chunk_z * 16 + z);
 
@@ -304,18 +304,67 @@ void ChunkGenerator::GenerateVegetation(int chunk_x, int chunk_z, uint16_t* bloc
             }
 
             if (surface_y > 62) {
+                double b_noise = biome_noise.Noise2D(wx * 0.04, wz * 0.04);
                 double tree_noise = terrain_noise.Noise2D(wx * 0.25, wz * 0.25);
-                if (tree_noise > 0.74) {
-                    // Grow Oak Tree
-                    for (int ty = 1; ty <= 5; ty++) {
-                        set_block_fast(blocks, x, surface_y + ty, z, BLOCK_OAK_LOG);
+
+                // Dappled Forest Biome (MC 26.3): Poplar trees, Shelf Mushrooms, Fallen Trunks, Red Shrubs
+                if (b_noise > 0.05 && b_noise < 0.65) {
+                    if (tree_noise > 0.74) {
+                        // Tall Poplar Tree (7 to 10 blocks)
+                        int trunk_height = 8 + (std::abs((int)(wx + wz)) % 3);
+                        for (int ty = 1; ty <= trunk_height; ty++) {
+                            set_block_fast(blocks, x, surface_y + ty, z, BLOCK_POPLAR_LOG);
+                        }
+
+                        // Attach Shelf Mushroom to trunk (MC 26.3)
+                        set_block_fast(blocks, x + 1, surface_y + 2, z, BLOCK_SHELF_MUSHROOM);
+                        set_block_fast(blocks, x, surface_y + 3, z + 1, BLOCK_SHELF_MUSHROOM);
+
+                        // Poplar Canopy with Autumn Foliage (Red, Orange, Yellow)
+                        uint16_t foliage_type = BLOCK_ORANGE_POPLAR_LEAVES;
+                        int leaf_variant = std::abs((int)(wx * 3 + wz * 7)) % 3;
+                        if (leaf_variant == 0) foliage_type = BLOCK_RED_POPLAR_LEAVES;
+                        else if (leaf_variant == 1) foliage_type = BLOCK_ORANGE_POPLAR_LEAVES;
+                        else foliage_type = BLOCK_YELLOW_POPLAR_LEAVES;
+
+                        for (int ly = trunk_height - 3; ly <= trunk_height + 2; ly++) {
+                            int rad = (ly == trunk_height + 2) ? 1 : 2;
+                            for (int lx = -rad; lx <= rad; lx++) {
+                                for (int lz = -rad; lz <= rad; lz++) {
+                                    if (lx == 0 && lz == 0 && ly <= trunk_height) continue;
+                                    if (std::abs(lx) == rad && std::abs(lz) == rad && ly > trunk_height) continue;
+                                    set_block_fast(blocks, x + lx, surface_y + ly, z + lz, foliage_type);
+                                }
+                            }
+                        }
+                    } else if (tree_noise > 0.66 && tree_noise <= 0.72) {
+                        // Fallen Poplar Tree (MC 26.3): Horizontal trunk with Shelf Mushroom & Brown Mushroom
+                        int log_len = 4 + (std::abs((int)(wx * 11)) % 3);
+                        for (int l = 0; l < log_len; l++) {
+                            if (x + l < 15) {
+                                set_block_fast(blocks, x + l, surface_y + 1, z, BLOCK_POPLAR_LOG);
+                            }
+                        }
+                        // Decorate fallen log
+                        set_block_fast(blocks, x + 1, surface_y + 2, z, BLOCK_BROWN_MUSHROOM);
+                        set_block_fast(blocks, x + 2, surface_y + 1, z + 1, BLOCK_SHELF_MUSHROOM);
+                    } else if (tree_noise > 0.40 && tree_noise <= 0.48) {
+                        // Red Shrub (MC 26.3)
+                        set_block_fast(blocks, x, surface_y + 1, z, BLOCK_RED_SHRUB);
                     }
-                    for (int lx = -2; lx <= 2; lx++) {
-                        for (int lz = -2; lz <= 2; lz++) {
-                            for (int ly = 3; ly <= 6; ly++) {
-                                if (lx == 0 && lz == 0 && ly < 6) continue;
-                                if (std::abs(lx) == 2 && std::abs(lz) == 2 && ly == 6) continue;
-                                set_block_fast(blocks, x + lx, surface_y + ly, z + lz, BLOCK_OAK_LEAVES);
+                } else {
+                    // Regular Forest / Plains: Standard Oak Tree
+                    if (tree_noise > 0.75) {
+                        for (int ty = 1; ty <= 5; ty++) {
+                            set_block_fast(blocks, x, surface_y + ty, z, BLOCK_OAK_LOG);
+                        }
+                        for (int lx = -2; lx <= 2; lx++) {
+                            for (int lz = -2; lz <= 2; lz++) {
+                                for (int ly = 3; ly <= 6; ly++) {
+                                    if (lx == 0 && lz == 0 && ly < 6) continue;
+                                    if (std::abs(lx) == 2 && std::abs(lz) == 2 && ly == 6) continue;
+                                    set_block_fast(blocks, x + lx, surface_y + ly, z + lz, BLOCK_OAK_LEAVES);
+                                }
                             }
                         }
                     }
@@ -348,6 +397,12 @@ void ChunkGenerator::GenerateStructures(int chunk_x, int chunk_z, uint16_t* bloc
     double dist = std::sqrt((double)(chunk_x * chunk_x + chunk_z * chunk_z));
     if (dist >= 80.0 && dist <= 120.0 && (std::abs(chunk_x * 31 + chunk_z * 17) % 25) == 0) {
         StampStronghold(chunk_x, chunk_z, blocks);
+    }
+
+    // 5. Abandoned Camp (Matches vanilla 26.3 spacing: 37 chunks, salt: 91231127)
+    int64_t camp_hash = ((int64_t)chunk_x * 91231127ULL) ^ ((int64_t)chunk_z * 7123981ULL) ^ (world_seed + 91231127);
+    if ((std::abs(camp_hash) % 37) == 0) {
+        StampAbandonedCamp(chunk_x, chunk_z, blocks);
     }
 }
 
@@ -488,6 +543,57 @@ void ChunkGenerator::StampStronghold(int chunk_x, int chunk_z, uint16_t* blocks)
 
     // Silverfish Monster Spawner
     set_block_fast(blocks, 7, sy + 3, 7, BLOCK_MONSTER_SPAWNER);
+}
+
+void ChunkGenerator::StampAbandonedCamp(int chunk_x, int chunk_z, uint16_t* blocks) {
+    int cx = 8, cz = 8;
+    int ground_y = 64;
+    for (int y = 100; y >= 62; y--) {
+        if (get_block_fast(blocks, cx, y, cz) == BLOCK_GRASS_BLOCK) {
+            ground_y = y;
+            break;
+        }
+    }
+
+    // 1. Central Campfire surrounded by Cobblestone ring and log seating
+    set_block_fast(blocks, 8, ground_y + 1, 8, BLOCK_CAMPFIRE);
+    set_block_fast(blocks, 7, ground_y, 8, BLOCK_COBBLESTONE);
+    set_block_fast(blocks, 9, ground_y, 8, BLOCK_COBBLESTONE);
+    set_block_fast(blocks, 8, ground_y, 7, BLOCK_COBBLESTONE);
+    set_block_fast(blocks, 8, ground_y, 9, BLOCK_COBBLESTONE);
+
+    // Poplar log seats
+    set_block_fast(blocks, 6, ground_y + 1, 8, BLOCK_POPLAR_LOG);
+    set_block_fast(blocks, 10, ground_y + 1, 8, BLOCK_POPLAR_LOG);
+    set_block_fast(blocks, 8, ground_y + 1, 6, BLOCK_POPLAR_LOG);
+
+    // 2. Abandoned Camp Tent (A-frame with Wool, Wool Slabs, Cushions, Straw Bed)
+    for (int tx = 2; tx <= 5; tx++) {
+        for (int tz = 10; tz <= 14; tz++) {
+            set_block_fast(blocks, tx, ground_y, tz, BLOCK_DIRT);
+        }
+    }
+
+    // Tent A-frame
+    for (int tz = 10; tz <= 14; tz++) {
+        set_block_fast(blocks, 2, ground_y + 1, tz, BLOCK_RED_WOOL);
+        set_block_fast(blocks, 2, ground_y + 2, tz, BLOCK_RED_WOOL_SLAB);
+        set_block_fast(blocks, 3, ground_y + 3, tz, BLOCK_WHITE_WOOL);
+        set_block_fast(blocks, 4, ground_y + 3, tz, BLOCK_WHITE_WOOL);
+        set_block_fast(blocks, 5, ground_y + 2, tz, BLOCK_RED_WOOL_SLAB);
+        set_block_fast(blocks, 5, ground_y + 1, tz, BLOCK_RED_WOOL);
+    }
+
+    // Inside Tent: Straw Bed (MC 26.3) & Cushions (MC 26.3)
+    set_block_fast(blocks, 3, ground_y + 1, 12, BLOCK_STRAW_BED);
+    set_block_fast(blocks, 3, ground_y + 1, 13, BLOCK_STRAW_BED);
+    set_block_fast(blocks, 4, ground_y + 1, 11, BLOCK_RED_CUSHION);
+
+    // Loot Chest with Explorer Map, Compass, Arrows
+    set_block_fast(blocks, 4, ground_y + 1, 13, BLOCK_CHEST);
+
+    // Entrance torch
+    set_block_fast(blocks, 3, ground_y + 2, 9, BLOCK_TORCH);
 }
 
 } // namespace nome
@@ -661,6 +767,12 @@ bool nome_worldgen_locate_structure(const char* structure_name, int origin_chunk
                 } else if (strcmp(structure_name, "mineshaft") == 0) {
                     int64_t m_hash = ((int64_t)cx * 12345ULL) ^ ((int64_t)cz * 67890ULL) ^ seed;
                     if ((std::abs(m_hash) % 16) == 0) {
+                        *out_chunk_x = cx; *out_chunk_z = cz;
+                        return true;
+                    }
+                } else if (strcmp(structure_name, "abandoned_camp") == 0 || strcmp(structure_name, "camp") == 0) {
+                    int64_t c_hash = ((int64_t)cx * 91231127ULL) ^ ((int64_t)cz * 7123981ULL) ^ (seed + 91231127);
+                    if ((std::abs(c_hash) % 37) == 0) {
                         *out_chunk_x = cx; *out_chunk_z = cz;
                         return true;
                     }
