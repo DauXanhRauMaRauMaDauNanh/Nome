@@ -489,7 +489,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     nome_net_queue_spiral_chunks(c, 0, 0, c->view_distance);
 
     // Immediately send center chunk (0, 0): 0x2E for 26.3, 0x25 for 1.20.4
-    static uint8_t chunk_payload[65536];
+    static uint8_t chunk_payload[262144];
     size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload), modern);
     if (chunk_len > 0) {
         int chunk_pkt_id = modern ? 0x2E : 0x25;
@@ -1012,7 +1012,7 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
         NomeClientSession *c = &net->clients[i];
         if (c->is_active && c->state == NOME_STATE_PLAY && c->pending_chunk_head < c->pending_chunk_count) {
             int sent_this_poll = 0;
-            static uint8_t chunk_payload[65536];
+            static uint8_t chunk_payload[262144];
             bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
             int chunk_pkt_id = modern ? 0x2E : 0x25;
             while (c->pending_chunk_head < c->pending_chunk_count && sent_this_poll < 2) {

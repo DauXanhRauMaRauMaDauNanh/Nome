@@ -656,6 +656,71 @@ static inline bool is_occluding_solid(uint16_t b) {
            b != BLOCK_RED_SHRUB && b != BLOCK_SHELF_MUSHROOM;
 }
 
+static inline uint16_t map_block_to_protocol(uint16_t b, bool modern) {
+    if (!modern) return b;
+    switch (b) {
+        case BLOCK_AIR: return 0;
+        case BLOCK_STONE: return 1;
+        case BLOCK_GRASS_BLOCK: return 9;
+        case BLOCK_DIRT: return 10;
+        case BLOCK_COBBLESTONE: return 14;
+        case BLOCK_OAK_PLANKS: return 15;
+        case BLOCK_BEDROCK: return 88;
+        case BLOCK_WATER: return 89;
+        case BLOCK_LAVA: return 105;
+        case BLOCK_SAND: return 121;
+        case BLOCK_GRAVEL: return 127;
+        case BLOCK_GOLD_ORE: return 132;
+        case BLOCK_IRON_ORE: return 134;
+        case BLOCK_COAL_ORE: return 136;
+        case BLOCK_OAK_LOG: return 140;
+        case BLOCK_OAK_LEAVES: return 294;
+        case BLOCK_GLASS: return 661;
+        case BLOCK_LAPIS_ORE: return 662;
+        case BLOCK_SANDSTONE: return 677;
+        case BLOCK_COBWEB: return 2362;
+        case BLOCK_TNT: return 3834;
+        case BLOCK_BOOKSHELF: return 3835;
+        case BLOCK_MOSSY_COBBLESTONE: return 4924;
+        case BLOCK_TORCH: return 4926;
+        case BLOCK_MONSTER_SPAWNER: return 5444;
+        case BLOCK_CHEST: return 5544;
+        case BLOCK_DIAMOND_ORE: return 6863;
+        case BLOCK_CRAFTING_TABLE: return 6866;
+        case BLOCK_FARMLAND: return 6875;
+        case BLOCK_FURNACE: return 6884;
+        case BLOCK_LADDER: return 7308;
+        case BLOCK_RAILS: return 7316;
+        case BLOCK_REDSTONE_ORE: return 8552;
+        case BLOCK_OAK_FENCE: return 8666;
+        case BLOCK_STONE_BRICKS: return 9488;
+        case BLOCK_DEEPSLATE: return 33774;
+        case BLOCK_COPPER_ORE: return 31147;
+        case BLOCK_END_PORTAL_FRAME: return 11207;
+        case BLOCK_EMERALD_ORE: return 11315;
+        case BLOCK_TERRACOTTA: return 14759;
+        case BLOCK_BROWN_MUSHROOM: return 3828;
+        case BLOCK_RED_MUSHROOM: return 3829;
+        case BLOCK_HAY_BLOCK: return 14741;
+        case BLOCK_DEEPSLATE_COAL_ORE: return 137;
+        case BLOCK_DEEPSLATE_IRON_ORE: return 135;
+        case BLOCK_DEEPSLATE_COPPER_ORE: return 31148;
+        case BLOCK_DEEPSLATE_GOLD_ORE: return 133;
+        case BLOCK_DEEPSLATE_REDSTONE_ORE: return 8554;
+        case BLOCK_DEEPSLATE_LAPIS_ORE: return 663;
+        case BLOCK_DEEPSLATE_DIAMOND_ORE: return 6864;
+        case BLOCK_DEEPSLATE_EMERALD_ORE: return 11316;
+        case BLOCK_POPLAR_LOG: return 140;
+        case BLOCK_POPLAR_LEAVES:
+        case BLOCK_RED_POPLAR_LEAVES:
+        case BLOCK_ORANGE_POPLAR_LEAVES:
+        case BLOCK_YELLOW_POPLAR_LEAVES: return 294;
+        case BLOCK_SHELF_MUSHROOM: return 3828;
+        case BLOCK_RED_SHRUB: return 3829;
+        default: return b;
+    }
+}
+
 size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf, bool modern) {
     if (!blocks || !out_buf || max_buf < 65536) return 0;
     
@@ -677,7 +742,7 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
     }
 
     // Temporary buffer to aggregate the 24 sections
-    static uint8_t sec_buffer[65536];
+    static uint8_t sec_buffer[262144];
     size_t sec_pos = 0;
 
     for (int s = 0; s < 24; s++) {
@@ -710,20 +775,27 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
                     }
 
                     int local_idx = (y * 16 + z) * 16 + x;
-                    sec_blocks[local_idx] = b;
-                    if (b != 0) non_air++;
+                    uint16_t mapped_b = map_block_to_protocol(b, modern);
+                    sec_blocks[local_idx] = mapped_b;
+                    if (mapped_b != 0) non_air++;
                 }
             }
         }
 
         // Section header: non-air block count (BE int16)
         write_be16(sec_buffer + sec_pos, non_air); sec_pos += 2;
+        if (modern) {
+            // Minecraft 26.3: fluidCount (BE int16)
+            write_be16(sec_buffer + sec_pos, 0); sec_pos += 2;
+        }
 
         if (non_air == 0) {
             // Entire section is Air -> single-valued palette
             sec_buffer[sec_pos++] = 0; // bits_per_entry = 0
             sec_pos += write_varint(sec_buffer + sec_pos, 0); // block state = 0 (Air)
-            sec_pos += write_varint(sec_buffer + sec_pos, 0); // data array len = 0
+            if (!modern) {
+                sec_pos += write_varint(sec_buffer + sec_pos, 0); // data array len = 0 (legacy only)
+            }
         } else {
             // Gather unique palette entries
             for (int i = 0; i < 4096; i++) {
@@ -737,7 +809,9 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
                 // Single-valued palette
                 sec_buffer[sec_pos++] = 0; // bits_per_entry = 0
                 sec_pos += write_varint(sec_buffer + sec_pos, palette[0]);
-                sec_pos += write_varint(sec_buffer + sec_pos, 0); // data len = 0
+                if (!modern) {
+                    sec_pos += write_varint(sec_buffer + sec_pos, 0); // data len = 0 (legacy only)
+                }
             } else if (palette.size() <= 256) {
                 // Indirect palette: determine minimal BPE between 4 and 8
                 uint8_t bpe = 4;
@@ -755,7 +829,9 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
                 // Pack 4096 entries (entries do NOT span across long boundaries per 1.16+ spec)
                 int entries_per_long = 64 / bpe;
                 int num_longs = (4096 + entries_per_long - 1) / entries_per_long;
-                sec_pos += write_varint(sec_buffer + sec_pos, num_longs);
+                if (!modern) {
+                    sec_pos += write_varint(sec_buffer + sec_pos, num_longs);
+                }
 
                 int block_idx = 0;
                 for (int l = 0; l < num_longs; l++) {
@@ -777,14 +853,16 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
                 sec_buffer[sec_pos++] = bpe;
                 int entries_per_long = 64 / bpe; // 4
                 int num_longs = (4096 + entries_per_long - 1) / entries_per_long; // 1024
-                sec_pos += write_varint(sec_buffer + sec_pos, num_longs);
+                if (!modern) {
+                    sec_pos += write_varint(sec_buffer + sec_pos, num_longs);
+                }
 
                 int block_idx = 0;
                 for (int l = 0; l < num_longs; l++) {
                     uint64_t val = 0;
                     for (int e = 0; e < entries_per_long; e++) {
                         if (block_idx < 4096) {
-                            uint64_t b = (uint64_t)sec_blocks[block_idx++];
+                            uint16_t b = (uint64_t)sec_blocks[block_idx++];
                             val |= ((b & 0x7FFF) << (e * bpe));
                         }
                     }
@@ -797,7 +875,9 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
         // Biomes PalettedContainer: single-valued Plains (41 for 26.3, 39 for 1.20.4)
         sec_buffer[sec_pos++] = 0; // bits_per_entry = 0
         sec_pos += write_varint(sec_buffer + sec_pos, modern ? 41 : 39); // biome = plains
-        sec_pos += write_varint(sec_buffer + sec_pos, 0); // data len = 0
+        if (!modern) {
+            sec_pos += write_varint(sec_buffer + sec_pos, 0); // data len = 0 (legacy only)
+        }
     }
 
     // 3. Write Data Size (VarInt) + Section Payload
