@@ -63,6 +63,15 @@ extern "C" {
     void nome_rust_add_player_tickets(int32_t center_cx, int32_t center_cz, int32_t radius, uint64_t current_tick);
     uint8_t nome_rust_get_chunk_level(int32_t cx, int32_t cz, uint64_t current_tick);
     bool nome_rust_save_world(const char* world_dir);
+
+    uint8_t nome_rust_alternate_current_update(int32_t x, int32_t y, int32_t z, uint8_t source_power);
+    bool nome_rust_check_aabb_collision(double min_x, double min_y, double min_z, double max_x, double max_y, double max_z, const uint16_t* block_grid, int32_t grid_w, int32_t grid_h, int32_t grid_d);
+
+    void nome_rust_radius_iteration_init();
+    int32_t nome_rust_get_radius_count(int32_t radius);
+    int32_t nome_rust_get_radius_iteration(int32_t radius, int32_t* out_dx, int32_t* out_dz, int32_t max_len);
+    void nome_rust_region_init(const char* world_dir);
+    bool nome_rust_region_save_chunk(int32_t cx, int32_t cz, const uint8_t* data, size_t data_len);
 }
 
 static NativeServerState* g_server = nullptr;
@@ -188,10 +197,12 @@ NOME_EXPORT bool nome_native_init() {
 #endif
         g_server = new NativeServerState();
         
-        // Initialize Rust high-performance subsystems (Logger, Folia Scheduler, Moonrise Tickets)
+        // Initialize Rust high-performance subsystems (Logger, Folia Scheduler, Moonrise Tickets & Radius Iteration)
         nome_rust_log_init("logs/latest.log");
         nome_rust_scheduler_init();
         nome_rust_tickets_init();
+        nome_rust_radius_iteration_init();
+        nome_rust_region_init("world");
 
         // Initialize multi-chunk manager and procedural terrain generator
         nome_chunk_init(1337);
@@ -500,6 +511,34 @@ NOME_EXPORT size_t nome_native_poll_ready_tasks(uint64_t current_tick, uint64_t*
 NOME_EXPORT bool nome_native_save_world(const char* world_dir) {
     nome_chunk_save_all();
     return nome_rust_save_world(world_dir);
+}
+
+NOME_EXPORT uint8_t nome_native_alternate_current_update(int32_t x, int32_t y, int32_t z, uint8_t source_power) {
+    return nome_rust_alternate_current_update(x, y, z, source_power);
+}
+
+NOME_EXPORT bool nome_native_check_aabb_collision(double min_x, double min_y, double min_z, double max_x, double max_y, double max_z, const uint16_t* block_grid, int32_t grid_w, int32_t grid_h, int32_t grid_d) {
+    return nome_rust_check_aabb_collision(min_x, min_y, min_z, max_x, max_y, max_z, block_grid, grid_w, grid_h, grid_d);
+}
+
+NOME_EXPORT void nome_native_radius_iteration_init() {
+    nome_rust_radius_iteration_init();
+}
+
+NOME_EXPORT int32_t nome_native_get_radius_count(int32_t radius) {
+    return nome_rust_get_radius_count(radius);
+}
+
+NOME_EXPORT int32_t nome_native_get_radius_iteration(int32_t radius, int32_t* out_dx, int32_t* out_dz, int32_t max_len) {
+    return nome_rust_get_radius_iteration(radius, out_dx, out_dz, max_len);
+}
+
+NOME_EXPORT void nome_native_region_init(const char* world_dir) {
+    nome_rust_region_init(world_dir);
+}
+
+NOME_EXPORT bool nome_native_region_save_chunk(int32_t cx, int32_t cz, const uint8_t* data, size_t data_len) {
+    return nome_rust_region_save_chunk(cx, cz, data, data_len);
 }
 
 NOME_EXPORT const char* nome_rust_version() {

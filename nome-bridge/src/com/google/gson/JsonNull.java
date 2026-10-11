@@ -1,0 +1,22 @@
+package com.google.gson;
+
+public final class JsonNull extends JsonElement {
+    public static final JsonNull INSTANCE = new JsonNull();
+
+    public JsonNull() {}
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof JsonNull;
+    }
+
+    @Override
+    public int hashCode() {
+        return JsonNull.class.hashCode();
+    }
+
+    @Override
+    public String toString() {
+        return "null";
+    }
+}

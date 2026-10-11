@@ -1,0 +1,6 @@
+package it.unimi.dsi.fastutil.objects;
+
+import java.util.Set;
+
+public interface ObjectSet<K> extends Set<K> {
+}

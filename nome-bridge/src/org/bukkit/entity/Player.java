@@ -12,8 +12,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
+import net.md_5.bungee.api.chat.BaseComponent;
+import net.kyori.adventure.audience.Audience;
 
-public interface Player extends Entity, CommandSender, OfflinePlayer, org.bukkit.plugin.messaging.PluginMessageRecipient {
+public interface Player extends Entity, CommandSender, OfflinePlayer, org.bukkit.plugin.messaging.PluginMessageRecipient, Audience {
     GameMode getGameMode();
     void setGameMode(GameMode mode);
     boolean isOnGround();
@@ -40,4 +42,27 @@ public interface Player extends Entity, CommandSender, OfflinePlayer, org.bukkit
     void kickPlayer(String message);
     InetSocketAddress getAddress();
     void setLocationInternal(Location loc);
+
+    default Spigot spigot() {
+        return new Spigot(this);
+    }
+
+    class Spigot {
+        private final Player player;
+        public Spigot(Player player) {
+            this.player = player;
+        }
+        public void sendMessage(BaseComponent component) {
+            if (component != null) {
+                player.sendMessage(component.toLegacyText());
+            }
+        }
+        public void sendMessage(BaseComponent... components) {
+            if (components != null) {
+                for (BaseComponent c : components) {
+                    sendMessage(c);
+                }
+            }
+        }
+    }
 }

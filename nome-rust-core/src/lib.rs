@@ -4,12 +4,15 @@ pub mod net;
 pub mod tick;
 pub mod bridge;
 pub mod logging;
+pub mod redstone;
 
 pub use bridge::ffi::*;
 pub use logging::*;
 pub use world::antixray::*;
 pub use world::ticket_manager::*;
+pub use world::collision::*;
 pub use tick::region_scheduler::*;
+pub use redstone::alternate_current::*;
 
 #[no_mangle]
 pub extern "C" fn nome_rust_core_version() -> *const std::os::raw::c_char {

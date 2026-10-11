@@ -63,18 +63,8 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Unpack only essential lightweight format libraries (Gson, SnakeYaml) - NO Netty/SLF4J/Log4j2!
-Write-Host "Unpacking minimal format helpers (Gson, SnakeYAML)..." -ForegroundColor Cyan
-$minimalJars = @(
-    "jarlib/gson-2.14.0.jar",
-    "jarlib/snakeyaml-2.2.jar",
-    "libraries/com/google/code/gson/gson/2.14.0/gson-2.14.0.jar"
-)
-foreach ($uj in $minimalJars) {
-    if (Test-Path $uj) {
-        & "C:\Program Files\Java\jdk-25.0.4\bin\jar.exe" -x -f $uj --dir target/classes
-    }
-}
+# Native format helpers (Gson, SnakeYAML, Fastutil, SLF4J, Log4j, Netty) are all 100% built-in!
+Write-Host "All Java library shims are 100% built-in native (Zero external JAR dependencies)!" -ForegroundColor Green
 Remove-Item -Force target/classes/module-info.class -ErrorAction SilentlyContinue
 
 # Package standalone Fat JAR with bundled native DLLs!

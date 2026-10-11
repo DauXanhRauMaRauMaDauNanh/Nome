@@ -73,6 +73,7 @@ public final class NomeNativeBridge {
     private static MethodHandle hScheduleEntity;
     private static MethodHandle hCancelTask;
     private static MethodHandle hSaveWorld;
+    private static MethodHandle hGetRadiusIteration;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -213,6 +214,9 @@ public final class NomeNativeBridge {
 
             lookup.find("nome_native_save_world").ifPresent(addr ->
                     hSaveWorld = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS)));
+
+            lookup.find("nome_native_get_radius_iteration").ifPresent(addr ->
+                    hGetRadiusIteration = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)));
 
             // Register Java EventBridge Upcalls into C++ Engine (8 stubs)
             hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
@@ -879,6 +883,24 @@ public final class NomeNativeBridge {
             return (boolean) hSaveWorld.invokeExact(dirSeg);
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    public static int[][] getRadiusIteration(int radius) {
+        if (!initialized || hGetRadiusIteration == null) return new int[0][0];
+        int max = (2 * radius + 1) * (2 * radius + 1);
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment dxSeg = arena.allocate(ValueLayout.JAVA_INT, max);
+            MemorySegment dzSeg = arena.allocate(ValueLayout.JAVA_INT, max);
+            int count = (int) hGetRadiusIteration.invokeExact(radius, dxSeg, dzSeg, max);
+            int[][] res = new int[count][2];
+            for (int i = 0; i < count; i++) {
+                res[i][0] = dxSeg.getAtIndex(ValueLayout.JAVA_INT, i);
+                res[i][1] = dzSeg.getAtIndex(ValueLayout.JAVA_INT, i);
+            }
+            return res;
+        } catch (Throwable t) {
+            return new int[0][0];
         }
     }
 }

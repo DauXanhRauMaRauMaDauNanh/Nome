@@ -19,7 +19,7 @@ extracted_vanilla_data/
 META-INF/
 
 # Runtime and world data
-world/
+/world/
 logs/
 cache_26_3/
 game_protocols.txt

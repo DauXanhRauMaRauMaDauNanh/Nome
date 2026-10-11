@@ -1,16 +1,27 @@
 package net.kyori.adventure.key;
 
 public interface Key extends Comparable<Key> {
+    String MINECRAFT_NAMESPACE = "minecraft";
+
     String namespace();
     String value();
     String asString();
+
+    static Key key(String string) {
+        int index = string.indexOf(':');
+        if (index >= 0) {
+            return key(string.substring(0, index), string.substring(index + 1));
+        }
+        return key(MINECRAFT_NAMESPACE, string);
+    }
 
     static Key key(String namespace, String value) {
         return new KeyImpl(namespace, value);
     }
 
-    static Key key(String string) {
-        String[] parts = string.split(":", 2);
-        return parts.length == 2 ? key(parts[0], parts[1]) : key("minecraft", parts[0]);
+    @Override
+    default int compareTo(Key other) {
+        int res = namespace().compareTo(other.namespace());
+        return res != 0 ? res : value().compareTo(other.value());
     }
 }
