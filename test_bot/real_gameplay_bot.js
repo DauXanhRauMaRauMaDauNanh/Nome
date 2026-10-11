@@ -170,7 +170,7 @@ socket.on('data', (chunk) => {
                 console.log(`[+] [Play] ${hexId} -> SetHeldSlot (0) received`);
             } else if (packetId === 0x61) {
                 console.log(`[+] [Play] ${hexId} -> SetChunkCacheRadius (4) received`);
-            } else if (packetId === 0x72) {
+            } else if (packetId === 0x71) {
                 console.log(`[+] [Play] ${hexId} -> SetSimulationDistance (4) received`);
             } else if (packetId === 0x60) {
                 console.log(`[+] [Play] ${hexId} -> SetChunkCacheCenter (0, 0)`);

@@ -433,11 +433,11 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bRad);
     }
 
-    // 5. Set Simulation Distance: 0x72 for 26.3, 0x60 for 1.20.4
+    // 5. Set Simulation Distance: 0x71 for 26.3, 0x60 for 1.20.4
     {
         NomePacketBuffer *bSim = nome_buffer_create(8);
         nome_buffer_write_varint(bSim, 4);
-        send_raw_packet(fd, modern ? 0x72 : 0x60, bSim->data, bSim->write_pos);
+        send_raw_packet(fd, modern ? 0x71 : 0x60, bSim->data, bSim->write_pos);
         nome_buffer_free(bSim);
     }
 
