@@ -205,13 +205,19 @@ socket.on('data', (chunk) => {
             } else if (packetId === 0x08) {
                 console.log(`[+] [Play] ${hexId} -> BlockUpdate confirmed by Native Engine!`);
             } else if (packetId === 0x7C) {
-                // System Chat Message
-                try {
-                    const strLen = readVarInt(payload, 0);
-                    const jsonStr = payload.slice(strLen.bytesRead, strLen.bytesRead + strLen.value).toString('utf8');
-                    console.log(`[+] [Play] ${hexId} -> Chat Broadcast: ${jsonStr}`);
-                } catch (e) {
-                    console.log(`[+] [Play] ${hexId} -> Chat Broadcast received (${payload.length} bytes)`);
+                // System Chat Message (26.3 NBT TAG_String or legacy JSON)
+                if (payload.length > 3 && payload[0] === 0x08) {
+                    const strLen = payload.readUInt16BE(1);
+                    const msg = payload.slice(3, 3 + strLen).toString('utf8');
+                    console.log(`[+] [Play] ${hexId} -> Chat Broadcast (26.3 NBT): "${msg}"`);
+                } else {
+                    try {
+                        const strLen = readVarInt(payload, 0);
+                        const jsonStr = payload.slice(strLen.bytesRead, strLen.bytesRead + strLen.value).toString('utf8');
+                        console.log(`[+] [Play] ${hexId} -> Chat Broadcast: ${jsonStr}`);
+                    } catch (e) {
+                        console.log(`[+] [Play] ${hexId} -> Chat Broadcast received (${payload.length} bytes)`);
+                    }
                 }
             } else if (packetId === 0x2D) {
                 console.log(`[+] [Play] ${hexId} -> KeepAlive received, replying...`);

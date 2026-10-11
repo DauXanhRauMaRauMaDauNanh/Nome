@@ -1002,12 +1002,30 @@ void nome_net_broadcast_chat(NomeServerNetwork *net, const char *message) {
     for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
         if (net->clients[i].is_active && net->clients[i].state == NOME_STATE_PLAY) {
             NomePacketBuffer *buf = nome_buffer_create(512);
-            nome_buffer_write_string(buf, json_msg);
-            uint8_t overlay = 0;
-            nome_buffer_write(buf, &overlay, 1);
             bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
-            int chat_pkt_id = modern ? 0x7C : 0x69;
-            send_raw_packet(net->clients[i].socket_fd, chat_pkt_id, buf->data, buf->write_pos);
+            if (modern) {
+                // Minecraft 26.3 / 1.21+ (Protocol 766+):
+                // ClientboundSystemChatPacket (0x7C) uses ComponentSerialization.TRUSTED_STREAM_CODEC
+                // Literal string component is serialized as anonymous NBT TAG_String (0x08):
+                // [0x08 (TAG_String)] [uint16_be string_len] [utf-8 string bytes] [uint8 overlay (0)]
+                uint8_t tag_id = 0x08; // TAG_String
+                nome_buffer_write(buf, &tag_id, 1);
+                size_t mlen = strlen(message);
+                if (mlen > 32767) mlen = 32767;
+                uint8_t len_be[2] = { (uint8_t)((mlen >> 8) & 0xFF), (uint8_t)(mlen & 0xFF) };
+                nome_buffer_write(buf, len_be, 2);
+                nome_buffer_write(buf, (const uint8_t*)message, mlen);
+                uint8_t overlay = 0;
+                nome_buffer_write(buf, &overlay, 1);
+                send_raw_packet(net->clients[i].socket_fd, 0x7C, buf->data, buf->write_pos);
+            } else {
+                // Legacy 1.20.4 ClientboundSystemChatPacket (0x69):
+                // VarInt string length + JSON string + boolean overlay
+                nome_buffer_write_string(buf, json_msg);
+                uint8_t overlay = 0;
+                nome_buffer_write(buf, &overlay, 1);
+                send_raw_packet(net->clients[i].socket_fd, 0x69, buf->data, buf->write_pos);
+            }
             nome_buffer_free(buf);
         }
     }
