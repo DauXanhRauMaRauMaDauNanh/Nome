@@ -117,16 +117,16 @@ socket.on('data', (chunk) => {
             }
         } else if (state === 'PLAY') {
             console.log('[+] Received PLAY Packet ID: 0x' + packetId.toString(16) + ' (len: ' + payload.length + ')');
-            if (packetId === 0x33) {
-                console.log('    -> Verified 26.3 ClientboundLoginPacket (0x33)!');
-            } else if (packetId === 0x61) {
-                console.log('    -> Verified 26.3 SetChunkCacheCenterPacket (0x61)!');
-            } else if (packetId === 0x64) {
-                console.log('    -> Verified 26.3 SetDefaultSpawnPositionPacket (0x64)!');
-            } else if (packetId === 0x4A) {
-                console.log('    -> Verified 26.3 PlayerPositionPacket (0x4A)!');
-            } else if (packetId === 0x2F) {
-                console.log('    -> Verified 26.3 LevelChunkWithLightPacket (0x2F)! 3D Procedural Terrain Received!');
+            if (packetId === 0x32) {
+                console.log('    -> Verified 26.3 ClientboundLoginPacket (0x32)!');
+            } else if (packetId === 0x60) {
+                console.log('    -> Verified 26.3 SetChunkCacheCenterPacket (0x60)!');
+            } else if (packetId === 0x63) {
+                console.log('    -> Verified 26.3 SetDefaultSpawnPositionPacket (0x63)!');
+            } else if (packetId === 0x49) {
+                console.log('    -> Verified 26.3 PlayerPositionPacket (0x49)!');
+            } else if (packetId === 0x2E) {
+                console.log('    -> Verified 26.3 LevelChunkWithLightPacket (0x2E)! 3D Procedural Terrain Received!');
                 console.log('===============================================================');
                 console.log('  MINECRAFT 26.3 (PROTOCOL 777) CONNECTION VERIFIED 100%!     ');
                 console.log('===============================================================');

@@ -220,6 +220,37 @@ void nome_net_send_raw(NomeServerNetwork *net, uint64_t player_id, int32_t packe
     }
 }
 
+static bool nome_net_send_all(int fd, const uint8_t *data, size_t total_len) {
+    if (fd < 0 || !data || total_len == 0) return false;
+    size_t sent = 0;
+    while (sent < total_len) {
+        int n = send(fd, (const char*)(data + sent), (int)(total_len - sent), 0);
+        if (n > 0) {
+            sent += (size_t)n;
+        } else if (n < 0) {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK) {
+#else
+            int err = errno;
+            if (err == EWOULDBLOCK || err == EAGAIN) {
+#endif
+                fd_set wfds;
+                FD_ZERO(&wfds);
+                FD_SET(fd, &wfds);
+                struct timeval tv = {1, 0}; // 1 second timeout
+                int sel = select(fd + 1, NULL, &wfds, NULL, &tv);
+                if (sel <= 0) return false;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void send_raw_packet(int fd, int32_t packet_id, const uint8_t *payload, size_t payload_len) {
     // Universal Packet Interception Hook for Anticheat, Anti-Xray and ProtocolLib
     if (g_active_net && g_active_net->on_packet_send) {
@@ -234,10 +265,26 @@ static void send_raw_packet(int fd, int32_t packet_id, const uint8_t *payload, s
     uint8_t len_buf[5];
     int len_len = nome_varint_encode(total_len, len_buf);
 
-    send(fd, (const char*)len_buf, len_len, 0);
-    send(fd, (const char*)id_buf, id_len, 0);
-    if (payload && payload_len > 0) {
-        send(fd, (const char*)payload, (int)payload_len, 0);
+    size_t full_size = (size_t)(len_len + id_len + payload_len);
+    if (full_size <= 65536) {
+        uint8_t stack_buf[65536];
+        memcpy(stack_buf, len_buf, len_len);
+        memcpy(stack_buf + len_len, id_buf, id_len);
+        if (payload && payload_len > 0) {
+            memcpy(stack_buf + len_len + id_len, payload, payload_len);
+        }
+        nome_net_send_all(fd, stack_buf, full_size);
+    } else {
+        uint8_t *heap_buf = (uint8_t*)malloc(full_size);
+        if (heap_buf) {
+            memcpy(heap_buf, len_buf, len_len);
+            memcpy(heap_buf + len_len, id_buf, id_len);
+            if (payload && payload_len > 0) {
+                memcpy(heap_buf + len_len + id_len, payload, payload_len);
+            }
+            nome_net_send_all(fd, heap_buf, full_size);
+            free(heap_buf);
+        }
     }
 }
 
@@ -322,7 +369,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_write(bLogin, &b_false, 1);
         nome_buffer_write(bLogin, &b_false, 1);
 
-        send_raw_packet(fd, 0x33, bLogin->data, bLogin->write_pos);
+        send_raw_packet(fd, 0x32, bLogin->data, bLogin->write_pos);
     } else {
         // Legacy 1.20.4 Login Packet
         nome_buffer_write_string(bLogin, "minecraft:overworld");
@@ -341,16 +388,16 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     }
     nome_buffer_free(bLogin);
 
-    // 2. Set Chunk Cache Center: 0x61 for 26.3, 0x52 for 1.20.4
+    // 2. Set Chunk Cache Center: 0x60 for 26.3, 0x52 for 1.20.4
     {
         NomePacketBuffer *bCenter = nome_buffer_create(16);
         nome_buffer_write_varint(bCenter, 0);
         nome_buffer_write_varint(bCenter, 0);
-        send_raw_packet(fd, modern ? 0x61 : 0x52, bCenter->data, bCenter->write_pos);
+        send_raw_packet(fd, modern ? 0x60 : 0x52, bCenter->data, bCenter->write_pos);
         nome_buffer_free(bCenter);
     }
 
-    // 3. Set Default Spawn Position: 0x64 for 26.3, 0x54 for 1.20.4
+    // 3. Set Default Spawn Position: 0x63 for 26.3, 0x54 for 1.20.4
     {
         NomePacketBuffer *bSpawn = nome_buffer_create(64);
         uint64_t pos_encoded = (((uint64_t)0 & 0x3FFFFFF) << 38) | (((uint64_t)0 & 0x3FFFFFF) << 12) | ((uint64_t)64 & 0xFFF);
@@ -364,7 +411,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
             float yaw = 0.0f, pitch = 0.0f;
             nome_buffer_write(bSpawn, (const uint8_t*)&yaw, 4);
             nome_buffer_write(bSpawn, (const uint8_t*)&pitch, 4);
-            send_raw_packet(fd, 0x64, bSpawn->data, bSpawn->write_pos);
+            send_raw_packet(fd, 0x63, bSpawn->data, bSpawn->write_pos);
         } else {
             nome_buffer_write(bSpawn, pos_bytes, 8);
             float angle = 0.0f;
@@ -374,7 +421,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bSpawn);
     }
 
-    // 4. Synchronize Player Position: 0x4A for 26.3, 0x3E for 1.20.4
+    // 4. Synchronize Player Position: 0x49 for 26.3, 0x3E for 1.20.4
     {
         NomePacketBuffer *bPos = nome_buffer_create(128);
         double px = 0.5, py = 65.0, pz = 0.5;
@@ -393,7 +440,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
             nome_buffer_write(bPos, (const uint8_t*)&pitch, 4);
             int32_t rel_mask = 0;
             nome_buffer_write(bPos, (const uint8_t*)&rel_mask, 4);
-            send_raw_packet(fd, 0x4A, bPos->data, bPos->write_pos);
+            send_raw_packet(fd, 0x49, bPos->data, bPos->write_pos);
         } else {
             nome_buffer_write(bPos, (const uint8_t*)&px, 8);
             nome_buffer_write(bPos, (const uint8_t*)&py, 8);
@@ -414,11 +461,11 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     c->current_chunk_z = 0;
     nome_net_queue_spiral_chunks(c, 0, 0, c->view_distance);
 
-    // Immediately send center chunk (0, 0): 0x2F for 26.3, 0x25 for 1.20.4
+    // Immediately send center chunk (0, 0): 0x2E for 26.3, 0x25 for 1.20.4
     static uint8_t chunk_payload[65536];
     size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload));
     if (chunk_len > 0) {
-        int chunk_pkt_id = modern ? 0x2F : 0x25;
+        int chunk_pkt_id = modern ? 0x2E : 0x25;
         send_raw_packet(fd, chunk_pkt_id, chunk_payload, chunk_len);
         c->pending_chunk_head = 1; // Center sent, rest streams per tick
     }
@@ -508,8 +555,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 c->state = NOME_STATE_CONFIGURATION;
 
                 if (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0) {
-                    // Send complete 26.3 configuration packet stream (SelectKnownPacks, RegistryData, UpdateTags, FinishConfiguration)
-                    send(c->socket_fd, (const char*)NOME_CONFIG_26_3_DATA, (int)NOME_CONFIG_26_3_DATA_LEN, 0);
+                    // Send complete 26.3 configuration packet stream (UpdateFeatures, SelectKnownPacks, RegistryData, UpdateTags, FinishConfiguration)
+                    nome_net_send_all(c->socket_fd, NOME_CONFIG_26_3_DATA, NOME_CONFIG_26_3_DATA_LEN);
                 } else {
                     // Send ClientboundFinishConfigurationPacket (0x02 for 1.20.4)
                     send_raw_packet(c->socket_fd, 0x02, NULL, 0);
@@ -807,7 +854,9 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
                     uint8_t byte_val = (uint8_t)(now_ms >> ((7 - b) * 8));
                     nome_buffer_write(ka, &byte_val, 1);
                 }
-                send_raw_packet(c->socket_fd, 0x26, ka->data, ka->write_pos);
+                bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
+                int ka_id = modern ? 0x2D : 0x24;
+                send_raw_packet(c->socket_fd, ka_id, ka->data, ka->write_pos);
                 nome_buffer_free(ka);
             }
         }
@@ -841,6 +890,13 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
         int client_fd = (int)accept(net->listen_fd, (struct sockaddr*)&client_addr, &addr_len);
         if (client_fd >= 0) {
             set_nonblocking(client_fd);
+            int sndbuf = 1048576;
+            setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, (const char*)&sndbuf, sizeof(sndbuf));
+            int rcvbuf = 1048576;
+            setsockopt(client_fd, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvbuf, sizeof(rcvbuf));
+            int nodelay = 1;
+            setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+
             bool slotted = false;
             for (int i = 0; i < MAX_NOME_CLIENTS; i++) {
                 if (!net->clients[i].is_active) {
@@ -898,7 +954,7 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
             int sent_this_poll = 0;
             static uint8_t chunk_payload[65536];
             bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
-            int chunk_pkt_id = modern ? 0x2F : 0x25;
+            int chunk_pkt_id = modern ? 0x2E : 0x25;
             while (c->pending_chunk_head < c->pending_chunk_count && sent_this_poll < 2) {
                 int cx = c->pending_chunk_x[c->pending_chunk_head];
                 int cz = c->pending_chunk_z[c->pending_chunk_head];
@@ -927,7 +983,7 @@ void nome_net_broadcast_chat(NomeServerNetwork *net, const char *message) {
             uint8_t overlay = 0;
             nome_buffer_write(buf, &overlay, 1);
             bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
-            int chat_pkt_id = modern ? 0x7D : 0x69;
+            int chat_pkt_id = modern ? 0x7C : 0x69;
             send_raw_packet(net->clients[i].socket_fd, chat_pkt_id, buf->data, buf->write_pos);
             nome_buffer_free(buf);
         }
@@ -947,7 +1003,7 @@ void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x
             bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
             NomePacketBuffer *buf = nome_buffer_create(128);
             if (modern) {
-                // 26.3 ClientboundPlayerPositionPacket (0x4A)
+                // 26.3 ClientboundPlayerPositionPacket (0x49)
                 nome_buffer_write_varint(buf, 2); // teleport id
                 nome_buffer_write(buf, (const uint8_t*)&x, 8);
                 nome_buffer_write(buf, (const uint8_t*)&y, 8);
@@ -960,7 +1016,7 @@ void nome_net_send_teleport(NomeServerNetwork *net, uint64_t player_id, double x
                 nome_buffer_write(buf, (const uint8_t*)&pitch, 4);
                 int32_t rel_mask = 0;
                 nome_buffer_write(buf, (const uint8_t*)&rel_mask, 4);
-                send_raw_packet(net->clients[i].socket_fd, 0x4A, buf->data, buf->write_pos);
+                send_raw_packet(net->clients[i].socket_fd, 0x49, buf->data, buf->write_pos);
             } else {
                 nome_buffer_write(buf, (const uint8_t*)&x, 8);
                 nome_buffer_write(buf, (const uint8_t*)&y, 8);
@@ -988,7 +1044,9 @@ void nome_net_send_block_change(NomeServerNetwork *net, int32_t x, int32_t y, in
             for (int b = 0; b < 8; b++) pos_bytes[7 - b] = (uint8_t)(pos_encoded >> (b * 8));
             nome_buffer_write(buf, pos_bytes, 8);
             nome_buffer_write_varint(buf, (int32_t)block_id);
-            send_raw_packet(net->clients[i].socket_fd, 0x09, buf->data, buf->write_pos);
+            bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
+            int block_pkt_id = modern ? 0x08 : 0x09;
+            send_raw_packet(net->clients[i].socket_fd, block_pkt_id, buf->data, buf->write_pos);
             nome_buffer_free(buf);
         }
     }

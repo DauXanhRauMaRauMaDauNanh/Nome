@@ -1,7 +1,10 @@
 # Reference large binary jars from Mojang & Paper
 leaf.jar
 paper.jar
+paper-26.3.jar
 mojang_26.3.jar
+jarlib/
+scratch/
 
 # Build artifacts & caches
 target/
