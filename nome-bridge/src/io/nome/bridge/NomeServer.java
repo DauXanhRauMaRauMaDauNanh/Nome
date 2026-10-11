@@ -319,4 +319,21 @@ public class NomeServer implements Server {
     public File getWorldContainer() {
         return new File(".");
     }
+
+    private final io.nome.bridge.scheduler.FoliaSchedulerImpl foliaScheduler = new io.nome.bridge.scheduler.FoliaSchedulerImpl();
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler() {
+        return foliaScheduler;
+    }
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler getGlobalRegionScheduler() {
+        return foliaScheduler;
+    }
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler() {
+        return foliaScheduler;
+    }
 }

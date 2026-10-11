@@ -14,4 +14,7 @@ public interface Entity {
     boolean isDead();
     void remove();
     EntityType getType();
+    default io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler() {
+        return new io.nome.bridge.scheduler.EntitySchedulerImpl(this);
+    }
 }

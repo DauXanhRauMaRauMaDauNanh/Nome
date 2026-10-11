@@ -74,4 +74,14 @@ public final class Bukkit {
     public static UnsafeValues getUnsafe() { return server.getUnsafe(); }
     public static boolean isStopping() { return server.isStopping(); }
     public static java.io.File getWorldContainer() { return server.getWorldContainer(); }
+
+    public static io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler() {
+        return server.getAsyncScheduler();
+    }
+    public static io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler getGlobalRegionScheduler() {
+        return server.getGlobalRegionScheduler();
+    }
+    public static io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler() {
+        return server.getRegionScheduler();
+    }
 }

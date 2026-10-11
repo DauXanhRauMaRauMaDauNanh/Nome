@@ -7,7 +7,7 @@ description = "Nome high-performance Minecraft Server Native Engine in Rust"
 
 [lib]
 name = "nome_rust_core"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 # Dependencies for high-performance multithreaded Minecraft server:

@@ -66,6 +66,14 @@ public final class NomeNativeBridge {
     private static MethodHandle hChunkSave;
     private static MethodHandle hChunkSaveAll;
 
+    // Rust Engine Downcalls (Logging, AntiXray, Folia Scheduler, World Persistence)
+    private static MethodHandle hLog;
+    private static MethodHandle hAntiXraySection;
+    private static MethodHandle hScheduleRegion;
+    private static MethodHandle hScheduleEntity;
+    private static MethodHandle hCancelTask;
+    private static MethodHandle hSaveWorld;
+
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
 
@@ -186,6 +194,25 @@ public final class NomeNativeBridge {
 
             hChunkSaveAll = linker.downcallHandle(lookup.find("nome_native_chunk_save_all").orElseThrow(),
                     FunctionDescriptor.of(ValueLayout.JAVA_LONG));
+
+            // Rust Engine Downcalls
+            lookup.find("nome_native_log").ifPresent(addr ->
+                    hLog = linker.downcallHandle(addr, FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS)));
+
+            lookup.find("nome_native_antixray_process_section").ifPresent(addr ->
+                    hAntiXraySection = linker.downcallHandle(addr, FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_BYTE, ValueLayout.JAVA_LONG)));
+
+            lookup.find("nome_native_schedule_region_task").ifPresent(addr ->
+                    hScheduleRegion = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG)));
+
+            lookup.find("nome_native_schedule_entity_task").ifPresent(addr ->
+                    hScheduleEntity = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG)));
+
+            lookup.find("nome_native_cancel_task").ifPresent(addr ->
+                    hCancelTask = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.JAVA_LONG)));
+
+            lookup.find("nome_native_save_world").ifPresent(addr ->
+                    hSaveWorld = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS)));
 
             // Register Java EventBridge Upcalls into C++ Engine (8 stubs)
             hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
@@ -792,6 +819,66 @@ public final class NomeNativeBridge {
             return addr.reinterpret(256).getString(0);
         } catch (Throwable t) {
             return "Nome Native Core Error: " + t.getMessage();
+        }
+    }
+
+    public static void rustLog(int level, String tag, String msg) {
+        if (!initialized || hLog == null || msg == null) {
+            System.out.println("[" + (tag != null ? tag : "Nome") + "] " + msg);
+            return;
+        }
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment tagSeg = arena.allocateFrom(tag != null ? tag : "Nome");
+            MemorySegment msgSeg = arena.allocateFrom(msg);
+            hLog.invokeExact(level, tagSeg, msgSeg);
+        } catch (Throwable t) {
+            System.out.println("[" + tag + "] " + msg);
+        }
+    }
+
+    public static void processSectionAntiXray(MemorySegment blocksSeg, int sectionY, byte mode, long seed) {
+        if (!initialized || hAntiXraySection == null || blocksSeg == null) return;
+        try {
+            hAntiXraySection.invokeExact(blocksSeg, sectionY, mode, seed);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static long scheduleRegionTask(int rx, int rz, long delayTicks, long intervalTicks, long callbackId, long currentTick) {
+        if (!initialized || hScheduleRegion == null) return 0;
+        try {
+            return (long) hScheduleRegion.invokeExact(rx, rz, delayTicks, intervalTicks, callbackId, currentTick);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public static long scheduleEntityTask(long entityId, long delayTicks, long intervalTicks, long callbackId, long currentTick) {
+        if (!initialized || hScheduleEntity == null) return 0;
+        try {
+            return (long) hScheduleEntity.invokeExact(entityId, delayTicks, intervalTicks, callbackId, currentTick);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public static boolean cancelTask(long taskId) {
+        if (!initialized || hCancelTask == null) return false;
+        try {
+            return (boolean) hCancelTask.invokeExact(taskId);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean saveWorld(String dir) {
+        if (!initialized || hSaveWorld == null) return false;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment dirSeg = arena.allocateFrom(dir != null ? dir : "world");
+            return (boolean) hSaveWorld.invokeExact(dirSeg);
+        } catch (Throwable t) {
+            return false;
         }
     }
 }

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.logging.*;
+import io.nome.bridge.NomeNativeBridge;
 
 /**
  * Authentic Minecraft / Paper / Leaf Console Logger and Formatter.
@@ -80,15 +81,15 @@ public class MinecraftConsole {
     }
 
     public static void info(String message) {
-        MINECRAFT_LOGGER.info(message);
+        NomeNativeBridge.rustLog(2, "Minecraft", translateColors(message));
     }
 
     public static void warn(String message) {
-        MINECRAFT_LOGGER.warning(message);
+        NomeNativeBridge.rustLog(3, "Minecraft", translateColors(message));
     }
 
     public static void error(String message) {
-        MINECRAFT_LOGGER.severe(message);
+        NomeNativeBridge.rustLog(4, "Minecraft", translateColors(message));
     }
 
     /**

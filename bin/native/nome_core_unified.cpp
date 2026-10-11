@@ -44,6 +44,27 @@ struct NativeServerState {
     NomeOnPacketSendFn java_on_packet_send{nullptr};
 };
 
+// Rust Native Engine bindings
+extern "C" {
+    bool nome_rust_log_init(const char* log_file_path);
+    void nome_rust_log(int32_t level, const char* tag, const char* msg);
+    void nome_rust_log_flush();
+    const char* nome_rust_core_version();
+
+    void nome_rust_antixray_process_section(uint16_t* blocks, int32_t section_y, uint8_t mode, uint64_t seed);
+
+    void nome_rust_scheduler_init();
+    uint64_t nome_rust_schedule_region_task(int32_t rx, int32_t rz, uint64_t delay_ticks, uint64_t interval_ticks, uint64_t callback_id, uint64_t current_tick);
+    uint64_t nome_rust_schedule_entity_task(uint64_t entity_id, uint64_t delay_ticks, uint64_t interval_ticks, uint64_t callback_id, uint64_t current_tick);
+    bool nome_rust_cancel_task(uint64_t task_id);
+    size_t nome_rust_poll_ready_tasks(uint64_t current_tick, uint64_t* out_callbacks, size_t max_callbacks);
+
+    void nome_rust_tickets_init();
+    void nome_rust_add_player_tickets(int32_t center_cx, int32_t center_cz, int32_t radius, uint64_t current_tick);
+    uint8_t nome_rust_get_chunk_level(int32_t cx, int32_t cz, uint64_t current_tick);
+    bool nome_rust_save_world(const char* world_dir);
+}
+
 static NativeServerState* g_server = nullptr;
 
 static NomeOnPlayerJoinFn g_cb_on_join = nullptr;
@@ -146,9 +167,6 @@ static void native_tick_loop() {
 
 extern "C" {
 
-NOME_EXPORT const char* nome_rust_version() {
-    return "Nome-Core v0.5.0-ultra [100% Native: C (IOCP) + C++ (WorldGen/ChunkManager/Crafting/Entities) + Rust Architecture]";
-}
 
 #ifdef _WIN32
 static void enable_windows_ansi() {
@@ -170,6 +188,11 @@ NOME_EXPORT bool nome_native_init() {
 #endif
         g_server = new NativeServerState();
         
+        // Initialize Rust high-performance subsystems (Logger, Folia Scheduler, Moonrise Tickets)
+        nome_rust_log_init("logs/latest.log");
+        nome_rust_scheduler_init();
+        nome_rust_tickets_init();
+
         // Initialize multi-chunk manager and procedural terrain generator
         nome_chunk_init(1337);
         // Preload and pin 49 spawn chunks (-3 to +3 in X and Z)
@@ -228,6 +251,8 @@ NOME_EXPORT void nome_native_stop() {
         }
         // Flush all chunks to disk on server stop
         nome_chunk_save_all();
+        nome_rust_save_world("world");
+        nome_rust_log_flush();
     }
 }
 
@@ -425,4 +450,61 @@ NOME_EXPORT bool nome_native_locate_structure(const char* name, int origin_cx, i
     return nome_worldgen_locate_structure(name, origin_cx, origin_cz, out_cx, out_cz, 1337);
 }
 
+// ==========================================
+// Rust Bridge Native Exports
+// ==========================================
+NOME_EXPORT bool nome_native_log_init(const char* log_file_path) {
+    return nome_rust_log_init(log_file_path);
 }
+
+NOME_EXPORT void nome_native_log(int32_t level, const char* tag, const char* msg) {
+    nome_rust_log(level, tag, msg);
+}
+
+NOME_EXPORT void nome_native_log_flush() {
+    nome_rust_log_flush();
+}
+
+NOME_EXPORT void nome_native_antixray_process_section(uint16_t* blocks, int32_t section_y, uint8_t mode, uint64_t seed) {
+    nome_rust_antixray_process_section(blocks, section_y, mode, seed);
+}
+
+NOME_EXPORT void nome_native_tickets_init() {
+    nome_rust_tickets_init();
+}
+
+NOME_EXPORT void nome_native_add_player_tickets(int32_t center_cx, int32_t center_cz, int32_t radius, uint64_t current_tick) {
+    nome_rust_add_player_tickets(center_cx, center_cz, radius, current_tick);
+}
+
+NOME_EXPORT uint8_t nome_native_get_chunk_level(int32_t cx, int32_t cz, uint64_t current_tick) {
+    return nome_rust_get_chunk_level(cx, cz, current_tick);
+}
+
+NOME_EXPORT uint64_t nome_native_schedule_region_task(int32_t rx, int32_t rz, uint64_t delay_ticks, uint64_t interval_ticks, uint64_t callback_id, uint64_t current_tick) {
+    return nome_rust_schedule_region_task(rx, rz, delay_ticks, interval_ticks, callback_id, current_tick);
+}
+
+NOME_EXPORT uint64_t nome_native_schedule_entity_task(uint64_t entity_id, uint64_t delay_ticks, uint64_t interval_ticks, uint64_t callback_id, uint64_t current_tick) {
+    return nome_rust_schedule_entity_task(entity_id, delay_ticks, interval_ticks, callback_id, current_tick);
+}
+
+NOME_EXPORT bool nome_native_cancel_task(uint64_t task_id) {
+    return nome_rust_cancel_task(task_id);
+}
+
+NOME_EXPORT size_t nome_native_poll_ready_tasks(uint64_t current_tick, uint64_t* out_callbacks, size_t max_callbacks) {
+    return nome_rust_poll_ready_tasks(current_tick, out_callbacks, max_callbacks);
+}
+
+NOME_EXPORT bool nome_native_save_world(const char* world_dir) {
+    nome_chunk_save_all();
+    return nome_rust_save_world(world_dir);
+}
+
+NOME_EXPORT const char* nome_rust_version() {
+    return nome_rust_core_version();
+}
+
+}
+

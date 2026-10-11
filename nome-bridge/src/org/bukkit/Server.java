@@ -54,4 +54,8 @@ public interface Server {
     UnsafeValues getUnsafe();
     boolean isStopping();
     File getWorldContainer();
+
+    io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler();
+    io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler getGlobalRegionScheduler();
+    io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler();
 }
