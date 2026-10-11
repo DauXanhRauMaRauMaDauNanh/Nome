@@ -202,6 +202,8 @@ socket.on('data', (chunk) => {
                 }, 400);
             } else if (packetId === 0x2E) {
                 console.log(`[+] [Play] ${hexId} -> LevelChunkWithLight: Chunk data received (${payload.length} bytes)`);
+            } else if (packetId === 0x47) {
+                console.log(`[+] [Play] ${hexId} -> PlayerInfoUpdate (Tab List / Player Tracker initialized)`);
             } else if (packetId === 0x08) {
                 console.log(`[+] [Play] ${hexId} -> BlockUpdate confirmed by Native Engine!`);
             } else if (packetId === 0x7C) {

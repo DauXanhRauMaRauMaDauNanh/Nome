@@ -432,6 +432,22 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bSpawn);
     }
 
+    // 3.5. Player Info Update (Add Player to Tab List): 0x47 for 26.3, 0x3C for 1.20.4
+    {
+        NomePacketBuffer *bInfo = nome_buffer_create(128);
+        // Actions bitmask: (1 << 0) ADD_PLAYER | (1 << 3) UPDATE_LISTED = 0x09
+        nome_buffer_write_varint(bInfo, 0x09);
+        nome_buffer_write_varint(bInfo, 1); // 1 player entry
+        uint8_t zero_uuid[16] = {0};
+        nome_buffer_write(bInfo, zero_uuid, 16); // player UUID
+        nome_buffer_write_string(bInfo, c->username); // username
+        nome_buffer_write_varint(bInfo, 0); // 0 properties
+        uint8_t listed = 1;
+        nome_buffer_write(bInfo, &listed, 1); // is listed = true
+        send_raw_packet(fd, modern ? 0x47 : 0x3C, bInfo->data, bInfo->write_pos);
+        nome_buffer_free(bInfo);
+    }
+
     // 4. Synchronize Player Position: 0x49 for 26.3, 0x3E for 1.20.4
     {
         NomePacketBuffer *bPos = nome_buffer_create(128);
@@ -600,6 +616,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 // Packets already streamed in full; no extra action required
             }
         } else if (c->state == NOME_STATE_PLAY) {
+            bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
+
             // Universal Packet Interception Hook for Anticheat & ProtocolLib
             if (net->on_packet_receive) {
                 bool allow = net->on_packet_receive((uint64_t)c->socket_fd, packet_id, payload, payload_len);
@@ -613,8 +631,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 }
             }
 
-            // KeepAlive Response (0x15 / 0x18 / 0x1B)
-            if (packet_id == 0x15 || packet_id == 0x18 || packet_id == 0x1B) {
+            // KeepAlive Response (0x1C for 26.3, 0x15 / 0x18 / 0x1B for legacy)
+            if (packet_id == 0x1C || packet_id == 0x15 || packet_id == 0x18 || packet_id == 0x1B) {
                 // KeepAlive acknowledged by client
             }
             // Teleport Confirm (0x00)
@@ -622,13 +640,21 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                 int32_t tp_id = 0;
                 nome_varint_decode(payload, payload_len, &tp_id);
             }
-            // Player Position / Position & Rotation (0x14, 0x16, 0x17, 0x18)
-            else if (packet_id == 0x14 || packet_id == 0x16 || packet_id == 0x17 || packet_id == 0x18) {
+            // Player Position / Position & Rotation:
+            // 26.3: Pos (0x1E), Pos+Rot (0x1F), Rot (0x20), OnGround (0x21)
+            // Legacy: Pos (0x14), Pos+Rot (0x16), Rot (0x17), OnGround (0x18)
+            else if ((modern && (packet_id == 0x1E || packet_id == 0x1F || packet_id == 0x20 || packet_id == 0x21)) ||
+                     (!modern && (packet_id == 0x14 || packet_id == 0x16 || packet_id == 0x17 || packet_id == 0x18))) {
                 double new_x = c->x, new_y = c->y, new_z = c->z;
                 float new_yaw = c->yaw, new_pitch = c->pitch;
                 bool on_ground = c->on_ground;
 
-                if (packet_id == 0x14 && payload_len >= 24) { // Pos
+                bool is_pos = (modern && packet_id == 0x1E) || (!modern && packet_id == 0x14);
+                bool is_pos_rot = (modern && packet_id == 0x1F) || (!modern && packet_id == 0x16);
+                bool is_rot = (modern && packet_id == 0x20) || (!modern && packet_id == 0x17);
+                bool is_ground_only = (modern && packet_id == 0x21) || (!modern && packet_id == 0x18);
+
+                if (is_pos && payload_len >= 24) { // Pos
                     uint64_t rx = 0, ry = 0, rz = 0;
                     for (int b = 0; b < 8; b++) rx = (rx << 8) | payload[b];
                     for (int b = 0; b < 8; b++) ry = (ry << 8) | payload[8 + b];
@@ -637,7 +663,7 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     memcpy(&new_y, &ry, 8);
                     memcpy(&new_z, &rz, 8);
                     if (payload_len >= 25) on_ground = (payload[24] != 0);
-                } else if (packet_id == 0x16 && payload_len >= 32) { // Pos + Rot
+                } else if (is_pos_rot && payload_len >= 32) { // Pos + Rot
                     uint64_t rx = 0, ry = 0, rz = 0;
                     for (int b = 0; b < 8; b++) rx = (rx << 8) | payload[b];
                     for (int b = 0; b < 8; b++) ry = (ry << 8) | payload[8 + b];
@@ -651,14 +677,14 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     memcpy(&new_yaw, &ryaw, 4);
                     memcpy(&new_pitch, &rpitch, 4);
                     if (payload_len >= 33) on_ground = (payload[32] != 0);
-                } else if (packet_id == 0x17 && payload_len >= 8) { // Rot
+                } else if (is_rot && payload_len >= 8) { // Rot
                     uint32_t ryaw = 0, rpitch = 0;
                     for (int b = 0; b < 4; b++) ryaw = (ryaw << 8) | payload[b];
                     for (int b = 0; b < 4; b++) rpitch = (rpitch << 8) | payload[4 + b];
                     memcpy(&new_yaw, &ryaw, 4);
                     memcpy(&new_pitch, &rpitch, 4);
                     if (payload_len >= 9) on_ground = (payload[8] != 0);
-                } else if (packet_id == 0x18 && payload_len >= 1) { // OnGround only
+                } else if (is_ground_only && payload_len >= 1) { // OnGround only
                     on_ground = (payload[0] != 0);
                 }
 
@@ -689,8 +715,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     }
                 }
             }
-            // Player Action / Digging / Block Break (0x1E / 0x24)
-            else if (packet_id == 0x1E || packet_id == 0x24) {
+            // Player Action / Digging / Block Break (0x29 for 26.3, 0x1E / 0x24 for legacy)
+            else if (packet_id == 0x29 || packet_id == 0x1E || packet_id == 0x24) {
                 int32_t status = 0;
                 int off = nome_varint_decode(payload, payload_len, &status);
                 if (off + 8 <= (int)payload_len) {
@@ -729,8 +755,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     }
                 }
             }
-            // Use Item On / Block Place (0x38 / 0x31)
-            else if (packet_id == 0x38 || packet_id == 0x31) {
+            // Use Item On / Block Place (0x42 for 26.3, 0x38 / 0x31 for legacy)
+            else if (packet_id == 0x42 || packet_id == 0x38 || packet_id == 0x31) {
                 int32_t hand = 0;
                 int off = nome_varint_decode(payload, payload_len, &hand);
                 if (off + 8 <= (int)payload_len) {
@@ -758,8 +784,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     nome_net_send_block_change(net, bx, by, bz, placed_block);
                 }
             }
-            // Player Chat & Command (0x05 / 0x06 / 0x07)
-            else if (packet_id == 0x05 || packet_id == 0x06 || packet_id == 0x07) {
+            // Player Chat & Command (0x07 / 0x08 / 0x09 for 26.3, 0x05 / 0x06 for legacy)
+            else if (packet_id == 0x07 || packet_id == 0x08 || packet_id == 0x09 || packet_id == 0x05 || packet_id == 0x06) {
                 int32_t str_len = 0;
                 int off = nome_varint_decode(payload, payload_len, &str_len);
                 char chat_msg[256];
@@ -767,11 +793,22 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     memcpy(chat_msg, payload + off, str_len);
                     chat_msg[str_len] = '\0';
 
-                    if (chat_msg[0] == '/') {
+                    bool is_cmd = (chat_msg[0] == '/' || packet_id == 0x07 || packet_id == 0x08 || (!modern && packet_id == 0x05));
+                    char final_cmd[260];
+                    if (is_cmd) {
+                        if (chat_msg[0] == '/') {
+                            strncpy(final_cmd, chat_msg, sizeof(final_cmd) - 1);
+                        } else {
+                            snprintf(final_cmd, sizeof(final_cmd), "/%s", chat_msg);
+                        }
+                        final_cmd[sizeof(final_cmd) - 1] = '\0';
+                    }
+
+                    if (is_cmd) {
                         // Handle Native Commands
-                        if (strncmp(chat_msg, "/tps", 4) == 0) {
+                        if (strncmp(final_cmd, "/tps", 4) == 0) {
                             nome_net_broadcast_chat(net, "§b[Nome-Native] §aTPS: 20.0 §7| §eMSPT: 0.04ms §7| §cZero-GC Native Engine");
-                        } else if (strncmp(chat_msg, "/craft", 6) == 0) {
+                        } else if (strncmp(final_cmd, "/craft", 6) == 0) {
                             // Test 26.3 Straw Bed recipe: 3 Hay Blocks (170) -> 4 Straw Beds (211)
                             uint16_t grid[4] = {170, 170, 170, 0};
                             uint16_t res = 0; uint8_t count = 0;
@@ -780,10 +817,10 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                                 snprintf(reply, sizeof(reply), "§b[Nome-Crafting-26.3] §eCrafted Straw Bed: Item %u x %u in pure Native C++", res, count);
                                 nome_net_broadcast_chat(net, reply);
                             }
-                        } else if (strncmp(chat_msg, "/locate", 7) == 0) {
+                        } else if (strncmp(final_cmd, "/locate", 7) == 0) {
                             char target[64] = "abandoned_camp";
-                            if (strlen(chat_msg) > 8) {
-                                strncpy(target, chat_msg + 8, sizeof(target) - 1);
+                            if (strlen(final_cmd) > 8) {
+                                strncpy(target, final_cmd + 8, sizeof(target) - 1);
                                 target[sizeof(target) - 1] = '\0';
                             }
                             int out_cx = 0, out_cz = 0;
@@ -797,22 +834,22 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                                 snprintf(reply, sizeof(reply), "§c[Nome-Locator] Structure '%s' not found within radius", target);
                                 nome_net_broadcast_chat(net, reply);
                             }
-                        } else if (strncmp(chat_msg, "/summon", 7) == 0) {
+                        } else if (strncmp(final_cmd, "/summon", 7) == 0) {
                             int32_t eid = nome_entity_spawn(10, c->x + 2.0, c->y, c->z); // Zombie
                             char reply[128];
                             snprintf(reply, sizeof(reply), "§a[Nome-ECS] Summoned Native Zombie (ID: %d) at [%.1f, %.1f, %.1f]", eid, c->x + 2.0, c->y, c->z);
                             nome_net_broadcast_chat(net, reply);
-                        } else if (strncmp(chat_msg, "/stats", 6) == 0 || strncmp(chat_msg, "/mem", 4) == 0) {
+                        } else if (strncmp(final_cmd, "/stats", 6) == 0 || strncmp(final_cmd, "/mem", 4) == 0) {
                             nome_net_broadcast_chat(net, "§b[Nome-Stats] §aOff-Heap Native: Active | JVM Heap: < 30MB | GC Pauses: 0.00ms");
-                        } else if (strncmp(chat_msg, "/time", 5) == 0) {
+                        } else if (strncmp(final_cmd, "/time", 5) == 0) {
                             nome_net_broadcast_chat(net, "§e[Nome-World] Time set to Day (Ticks: 1000)");
-                        } else if (strncmp(chat_msg, "/weather", 8) == 0) {
+                        } else if (strncmp(final_cmd, "/weather", 8) == 0) {
                             nome_net_broadcast_chat(net, "§e[Nome-World] Weather changed to Clear skies");
-                        } else if (strncmp(chat_msg, "/gamemode", 9) == 0) {
+                        } else if (strncmp(final_cmd, "/gamemode", 9) == 0) {
                             nome_net_broadcast_chat(net, "§e[Nome-Player] Set game mode to Creative");
                         } else {
                             char reply[128];
-                            snprintf(reply, sizeof(reply), "§7[Nome] Native command executed: %s", chat_msg);
+                            snprintf(reply, sizeof(reply), "§7[Nome] Native command executed: %s", final_cmd);
                             nome_net_broadcast_chat(net, reply);
                         }
                     } else {
@@ -825,8 +862,8 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     }
                 }
             }
-            // Player Craft / Click Container (0x0E / 0x0F)
-            else if (packet_id == 0x0E || packet_id == 0x0F) {
+            // Player Craft / Click Container (0x12 for 26.3, 0x0E / 0x0F for legacy)
+            else if (packet_id == 0x12 || packet_id == 0x0E || packet_id == 0x0F) {
                 // Solve 2x2 Crafting Matrix
                 uint16_t grid[4] = {c->inventory[1], c->inventory[2], c->inventory[3], c->inventory[4]};
                 // Fallback default test craft if grid empty: 1 Oak Log -> 4 Planks
@@ -841,17 +878,17 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
                     nome_net_send_slot(net, (uint64_t)c->socket_fd, 0, 0, result_item, result_count);
                 }
             }
-            // Client Information (0x03)
-            else if (packet_id == 0x03) {
+            // Client Information (0x0E for 26.3, 0x03 / 0x08 for legacy)
+            else if (packet_id == 0x0E || packet_id == 0x03 || packet_id == 0x08) {
                 // Client locale & view distance received
             }
-            // Plugin Message (0x04 / 0x0D)
-            else if (packet_id == 0x04 || packet_id == 0x0D) {
-                // Responds to brand query
+            // Plugin Message / Custom Payload (0x16 for 26.3, 0x04 / 0x0D / 0x10 for legacy)
+            else if (packet_id == 0x16 || packet_id == 0x04 || packet_id == 0x0D || packet_id == 0x10) {
+                // Responds to brand query (0x18 for 26.3, 0x17 for legacy)
                 NomePacketBuffer *bBrand = nome_buffer_create(64);
                 nome_buffer_write_string(bBrand, "minecraft:brand");
                 nome_buffer_write_string(bBrand, "Nome (100% Native C/C++/Rust)");
-                send_raw_packet(c->socket_fd, 0x18, bBrand->data, bBrand->write_pos);
+                send_raw_packet(c->socket_fd, modern ? 0x18 : 0x17, bBrand->data, bBrand->write_pos);
                 nome_buffer_free(bBrand);
             }
         }
@@ -1103,15 +1140,23 @@ void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, uint8_t wind
             int16_t s = (int16_t)slot;
             uint8_t slot_be[2] = {(uint8_t)(s >> 8), (uint8_t)s};
             nome_buffer_write(buf, slot_be, 2);
+            bool modern = (net->clients[i].protocol_version >= 766 || net->clients[i].protocol_version == 777 || net->clients[i].protocol_version == 0);
             if (count > 0 && item_id > 0) {
                 nome_buffer_write_varint(buf, count);
                 nome_buffer_write_varint(buf, item_id);
-                uint8_t no_nbt = 0;
-                nome_buffer_write(buf, &no_nbt, 1);
+                if (modern) {
+                    // Minecraft 26.3 / 1.21+ DataComponentPatch: 0 added components, 0 removed components
+                    nome_buffer_write_varint(buf, 0);
+                    nome_buffer_write_varint(buf, 0);
+                } else {
+                    // Legacy NBT: TAG_End (0x00)
+                    uint8_t no_nbt = 0;
+                    nome_buffer_write(buf, &no_nbt, 1);
+                }
             } else {
                 nome_buffer_write_varint(buf, 0);
             }
-            send_raw_packet(net->clients[i].socket_fd, 0x14, buf->data, buf->write_pos);
+            send_raw_packet(net->clients[i].socket_fd, modern ? 0x14 : 0x13, buf->data, buf->write_pos);
             nome_buffer_free(buf);
             break;
         }
