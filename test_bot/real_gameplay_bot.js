@@ -164,14 +164,46 @@ socket.on('data', (chunk) => {
 
             if (packetId === 0x32) {
                 console.log(`[+] [Play] ${hexId} -> ClientboundLoginPacket (Joined World: minecraft:overworld)`);
+            } else if (packetId === 0x41) {
+                console.log(`[+] [Play] ${hexId} -> PlayerAbilities received`);
+            } else if (packetId === 0x6B) {
+                console.log(`[+] [Play] ${hexId} -> SetHeldSlot (0) received`);
+            } else if (packetId === 0x61) {
+                console.log(`[+] [Play] ${hexId} -> SetChunkCacheRadius (4) received`);
+            } else if (packetId === 0x72) {
+                console.log(`[+] [Play] ${hexId} -> SetSimulationDistance (4) received`);
             } else if (packetId === 0x60) {
                 console.log(`[+] [Play] ${hexId} -> SetChunkCacheCenter (0, 0)`);
             } else if (packetId === 0x63) {
                 console.log(`[+] [Play] ${hexId} -> SetDefaultSpawnPosition (X:0, Y:64, Z:0)`);
+            } else if (packetId === 0x27) {
+                const evtType = payload[0];
+                console.log(`[+] [Play] ${hexId} -> GameEvent received: Type ${evtType} (LEVEL_CHUNKS_LOAD_START) -> LoadingScreen ARMED!`);
+            } else if (packetId === 0x0C) {
+                console.log(`[+] [Play] ${hexId} -> ChunkBatchStart received`);
+            } else if (packetId === 0x0B) {
+                const batchSizeInfo = readVarInt(payload, 0);
+                console.log(`[+] [Play] ${hexId} -> ChunkBatchFinished: ${batchSizeInfo.value} chunks in batch -> Client Level Ready!`);
+                // Send ServerboundChunkBatchReceived (0x0B) with desired chunks per tick float (2.0f)
+                const cbrBuf = Buffer.alloc(4);
+                cbrBuf.writeFloatBE(2.0, 0);
+                socket.write(createPacket(0x0B, cbrBuf));
+                console.log('[+] [Play] Sent ServerboundChunkBatchReceived (0x0B)');
+
+                // Send ServerboundPlayerLoaded (0x2C)
+                socket.write(createPacket(0x2C));
+                console.log('[+] [Play] Sent ServerboundPlayerLoaded (0x2C) -> Terrain Loading Dismissed 100%!');
             } else if (packetId === 0x49) {
                 console.log(`[+] [Play] ${hexId} -> PlayerPositionSync: Spawning at (0.5, 65.0, 0.5)`);
-                // Confirm teleport ID 1
-                socket.write(createPacket(0x00, writeVarInt(1)));
+                // Confirm teleport ID 1 (in 26.3 with pos)
+                const tpBuf = Buffer.alloc(33);
+                writeVarInt(1).copy(tpBuf, 0);
+                tpBuf.writeDoubleBE(0.5, 1);
+                tpBuf.writeDoubleBE(65.0, 9);
+                tpBuf.writeDoubleBE(0.5, 17);
+                tpBuf.writeFloatBE(0.0, 25);
+                tpBuf.writeFloatBE(0.0, 29);
+                socket.write(createPacket(0x00, tpBuf));
                 console.log('[+] [Action 1/5] Confirmed Teleport ID 1');
 
                 // Schedule Survival Actions

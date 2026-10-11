@@ -399,7 +399,49 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
     }
     nome_buffer_free(bLogin);
 
-    // 2. Set Chunk Cache Center: 0x60 for 26.3, 0x52 for 1.20.4
+    // 2. Player Abilities: 0x41 for 26.3, 0x36 for 1.20.4
+    {
+        NomePacketBuffer *bAbilities = nome_buffer_create(16);
+        uint8_t ab_flags = 0; // survival: not invulnerable, not flying, cannot fly, no instabuild
+        float flying_speed = 0.05f;
+        float walking_speed = 0.1f;
+        nome_buffer_write(bAbilities, &ab_flags, 1);
+        nome_buffer_write(bAbilities, (const uint8_t*)&flying_speed, 4);
+        nome_buffer_write(bAbilities, (const uint8_t*)&walking_speed, 4);
+        send_raw_packet(fd, modern ? 0x41 : 0x36, bAbilities->data, bAbilities->write_pos);
+        nome_buffer_free(bAbilities);
+    }
+
+    // 3. Set Held Slot: 0x6B for 26.3, 0x51 for 1.20.4
+    {
+        NomePacketBuffer *bSlot = nome_buffer_create(8);
+        if (modern) {
+            nome_buffer_write_varint(bSlot, 0);
+        } else {
+            uint8_t slot0 = 0;
+            nome_buffer_write(bSlot, &slot0, 1);
+        }
+        send_raw_packet(fd, modern ? 0x6B : 0x51, bSlot->data, bSlot->write_pos);
+        nome_buffer_free(bSlot);
+    }
+
+    // 4. Set Chunk Cache Radius / View Distance: 0x61 for 26.3, 0x53 for 1.20.4
+    {
+        NomePacketBuffer *bRad = nome_buffer_create(8);
+        nome_buffer_write_varint(bRad, 4);
+        send_raw_packet(fd, modern ? 0x61 : 0x53, bRad->data, bRad->write_pos);
+        nome_buffer_free(bRad);
+    }
+
+    // 5. Set Simulation Distance: 0x72 for 26.3, 0x60 for 1.20.4
+    {
+        NomePacketBuffer *bSim = nome_buffer_create(8);
+        nome_buffer_write_varint(bSim, 4);
+        send_raw_packet(fd, modern ? 0x72 : 0x60, bSim->data, bSim->write_pos);
+        nome_buffer_free(bSim);
+    }
+
+    // 6. Set Chunk Cache Center: 0x60 for 26.3, 0x52 for 1.20.4
     {
         NomePacketBuffer *bCenter = nome_buffer_create(16);
         nome_buffer_write_varint(bCenter, 0);
@@ -408,7 +450,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bCenter);
     }
 
-    // 3. Set Default Spawn Position: 0x63 for 26.3, 0x54 for 1.20.4
+    // 7. Set Default Spawn Position: 0x63 for 26.3, 0x54 for 1.20.4
     {
         NomePacketBuffer *bSpawn = nome_buffer_create(64);
         uint64_t pos_encoded = (((uint64_t)0 & 0x3FFFFFF) << 38) | (((uint64_t)0 & 0x3FFFFFF) << 12) | ((uint64_t)64 & 0xFFF);
@@ -432,7 +474,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bSpawn);
     }
 
-    // 3.5. Player Info Update (Add Player to Tab List): 0x47 for 26.3, 0x3C for 1.20.4
+    // 8. Player Info Update (Add Player to Tab List): 0x47 for 26.3, 0x3C for 1.20.4
     {
         NomePacketBuffer *bInfo = nome_buffer_create(128);
         // Actions bitmask: (1 << 0) ADD_PLAYER | (1 << 3) UPDATE_LISTED = 0x09
@@ -448,7 +490,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bInfo);
     }
 
-    // 4. Synchronize Player Position: 0x49 for 26.3, 0x3E for 1.20.4
+    // 9. Synchronize Player Position: 0x49 for 26.3, 0x3E for 1.20.4
     {
         NomePacketBuffer *bPos = nome_buffer_create(128);
         double px = 0.5, py = 65.0, pz = 0.5;
@@ -482,18 +524,45 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
         nome_buffer_free(bPos);
     }
 
-    // 5. Initialize Smart Chunk Streaming (View distance 4 spiral queue)
+    // 10. CRITICAL: ClientboundGameEventPacket (LEVEL_CHUNKS_LOAD_START = 13): 0x27 for 26.3, 0x20 for 1.20.4
+    // This transitions the client's LevelLoadTracker from WaitingForServer to WaitingForPlayerChunk,
+    // arming the playerCompiledSectionCallback so that LevelLoadingScreen dismisses upon chunk receipt!
+    {
+        NomePacketBuffer *bEvt = nome_buffer_create(16);
+        uint8_t evt_type = 13; // LEVEL_CHUNKS_LOAD_START
+        float param = 0.0f;
+        nome_buffer_write(bEvt, &evt_type, 1);
+        nome_buffer_write(bEvt, (const uint8_t*)&param, 4);
+        send_raw_packet(fd, modern ? 0x27 : 0x20, bEvt->data, bEvt->write_pos);
+        nome_buffer_free(bEvt);
+    }
+
+    // 11. Initialize Smart Chunk Streaming (View distance 4 spiral queue)
     c->view_distance = 4;
     c->current_chunk_x = 0;
     c->current_chunk_z = 0;
     nome_net_queue_spiral_chunks(c, 0, 0, c->view_distance);
 
-    // Immediately send center chunk (0, 0): 0x2E for 26.3, 0x25 for 1.20.4
+    // 12. Immediately send center chunk (0, 0) wrapped in Chunk Batch Delimiters!
     static uint8_t chunk_payload[262144];
     size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload), modern);
     if (chunk_len > 0) {
+        int batch_start_id = modern ? 0x0C : 0x0D;
+        int batch_finished_id = modern ? 0x0B : 0x0C;
         int chunk_pkt_id = modern ? 0x2E : 0x25;
+
+        // 12a. CHUNK_BATCH_START (empty payload)
+        send_raw_packet(fd, batch_start_id, NULL, 0);
+
+        // 12b. LEVEL_CHUNK_WITH_LIGHT
         send_raw_packet(fd, chunk_pkt_id, chunk_payload, chunk_len);
+
+        // 12c. CHUNK_BATCH_FINISHED (VarInt batchSize = 1)
+        NomePacketBuffer *bBatchFin = nome_buffer_create(8);
+        nome_buffer_write_varint(bBatchFin, 1);
+        send_raw_packet(fd, batch_finished_id, bBatchFin->data, bBatchFin->write_pos);
+        nome_buffer_free(bBatchFin);
+
         c->pending_chunk_head = 1; // Center sent, rest streams per tick
     }
 }
@@ -635,10 +704,32 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
             if (packet_id == 0x1C || packet_id == 0x15 || packet_id == 0x18 || packet_id == 0x1B) {
                 // KeepAlive acknowledged by client
             }
-            // Teleport Confirm (0x00)
+            // Teleport Confirm / Accept Teleportation (0x00)
             else if (packet_id == 0x00) {
                 int32_t tp_id = 0;
-                nome_varint_decode(payload, payload_len, &tp_id);
+                int off = nome_varint_decode(payload, payload_len, &tp_id);
+                if (modern && (size_t)(off + 32) <= payload_len) {
+                    uint64_t rx = 0, ry = 0, rz = 0;
+                    for (int b = 0; b < 8; b++) rx = (rx << 8) | payload[off + b];
+                    for (int b = 0; b < 8; b++) ry = (ry << 8) | payload[off + 8 + b];
+                    for (int b = 0; b < 8; b++) rz = (rz << 8) | payload[off + 16 + b];
+                    memcpy(&c->x, &rx, 8);
+                    memcpy(&c->y, &ry, 8);
+                    memcpy(&c->z, &rz, 8);
+                    uint32_t ryaw = 0, rpitch = 0;
+                    for (int b = 0; b < 4; b++) ryaw = (ryaw << 8) | payload[off + 24 + b];
+                    for (int b = 0; b < 4; b++) rpitch = (rpitch << 8) | payload[off + 28 + b];
+                    memcpy(&c->yaw, &ryaw, 4);
+                    memcpy(&c->pitch, &rpitch, 4);
+                }
+            }
+            // Chunk Batch Received (0x0B for 26.3, 0x07 for legacy)
+            else if ((modern && packet_id == 0x0B) || (!modern && packet_id == 0x07)) {
+                // Client acknowledges chunk batch
+            }
+            // Player Loaded into World (0x2C for 26.3)
+            else if (modern && packet_id == 0x2C) {
+                // Client confirmed terrain loaded and player in world
             }
             // Player Position / Position & Rotation:
             // 26.3: Pos (0x1E), Pos+Rot (0x1F), Rot (0x20), OnGround (0x21)
@@ -1014,7 +1105,13 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
             int sent_this_poll = 0;
             static uint8_t chunk_payload[262144];
             bool modern = (c->protocol_version >= 766 || c->protocol_version == 777 || c->protocol_version == 0);
+            int batch_start_id = modern ? 0x0C : 0x0D;
+            int batch_finished_id = modern ? 0x0B : 0x0C;
             int chunk_pkt_id = modern ? 0x2E : 0x25;
+
+            // Start Chunk Batch
+            send_raw_packet(c->socket_fd, batch_start_id, NULL, 0);
+
             while (c->pending_chunk_head < c->pending_chunk_count && sent_this_poll < 2) {
                 int cx = c->pending_chunk_x[c->pending_chunk_head];
                 int cz = c->pending_chunk_z[c->pending_chunk_head];
@@ -1025,6 +1122,12 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
                     sent_this_poll++;
                 }
             }
+
+            // Finish Chunk Batch
+            NomePacketBuffer *bBatchFin = nome_buffer_create(8);
+            nome_buffer_write_varint(bBatchFin, sent_this_poll);
+            send_raw_packet(c->socket_fd, batch_finished_id, bBatchFin->data, bBatchFin->write_pos);
+            nome_buffer_free(bBatchFin);
         }
     }
 
