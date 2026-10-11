@@ -27,7 +27,7 @@ public class Main {
         // Sleek Paper / Leaf style Banner
         System.out.println("\u001b[96m  _   _   ___   __  __  ___ \u001b[0m");
         System.out.println("\u001b[96m | \\ | | / _ \\ |  \\/  || __|\u001b[0m  \u001b[1mNome Server - 100% Native C/C++/Rust Core\u001b[0m");
-        System.out.println("\u001b[96m |  \\| || (_) || |\\/| || _|\u001b[0m   Minecraft 26.3 / 1.20.4 (Protocol 777)");
+        System.out.println("\u001b[96m |  \\| || (_) || |\\/| || _|\u001b[0m   Minecraft 26.3 (Protocol 777)");
         System.out.println("\u001b[96m |_|\\__| \\___/ |_|  |_||___|\u001b[0m  Ultra High-Performance & Off-Heap Memory\n");
 
         // 1. Process and filter Hosting Flags & Arguments
@@ -38,9 +38,9 @@ public class Main {
         ensureServerProperties(hostConfig.port);
 
         // 3. Minecraft Standard Server Startup Logs
-        MinecraftConsole.info("Starting minecraft server version 1.20.4");
+        MinecraftConsole.info("Starting minecraft server version 26.3");
         MinecraftConsole.info("Loading properties");
-        MinecraftConsole.info("This server is running Nome version 26.3-NATIVE (Protocol 777) (Implementing API version 1.21.4-R0.1-SNAPSHOT)");
+        MinecraftConsole.info("This server is running Nome version 26.3-NATIVE (Protocol 777) (Implementing API version 26.3-R0.1-SNAPSHOT)");
         MinecraftConsole.info("Server Ping Player Sample: 0/100");
         MinecraftConsole.info("Using 4 threads for Netty/IOCP event loop");
         MinecraftConsole.info("Generating keypair");
@@ -101,6 +101,10 @@ public class Main {
                         server.broadcastMessage("[Server] " + msg);
                     } else if (line.equalsIgnoreCase("version") || line.equalsIgnoreCase("ver")) {
                         MinecraftConsole.info("This server is running Nome version 26.3-NATIVE (Protocol 777 & 765) (Implementing 100% Native C/C++ Engine & Bukkit/Paper API)");
+                    } else if (line.equalsIgnoreCase("reload") || line.equalsIgnoreCase("rl")) {
+                        server.reload();
+                    } else if (line.equalsIgnoreCase("icon")) {
+                        server.loadOrInitServerIcon();
                     } else {
                         boolean handled = server.getCommandMap().dispatch(server.getConsoleSender(), line);
                         if (!handled) {

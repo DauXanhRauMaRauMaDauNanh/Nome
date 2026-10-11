@@ -545,5 +545,9 @@ NOME_EXPORT const char* nome_rust_version() {
     return nome_rust_core_version();
 }
 
+NOME_EXPORT void nome_native_set_favicon(const char* favicon) {
+    nome_net_set_favicon(favicon);
+}
+
 }
 

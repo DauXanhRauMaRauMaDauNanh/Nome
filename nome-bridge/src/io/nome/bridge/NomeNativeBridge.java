@@ -74,6 +74,7 @@ public final class NomeNativeBridge {
     private static MethodHandle hCancelTask;
     private static MethodHandle hSaveWorld;
     private static MethodHandle hGetRadiusIteration;
+    private static MethodHandle hSetFavicon;
 
     public static synchronized boolean loadNativeEngine(String nativeDir) {
         if (initialized) return true;
@@ -217,6 +218,9 @@ public final class NomeNativeBridge {
 
             lookup.find("nome_native_get_radius_iteration").ifPresent(addr ->
                     hGetRadiusIteration = linker.downcallHandle(addr, FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)));
+
+            lookup.find("nome_native_set_favicon").ifPresent(addr ->
+                    hSetFavicon = linker.downcallHandle(addr, FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)));
 
             // Register Java EventBridge Upcalls into C++ Engine (8 stubs)
             hRegisterCallbacks = linker.downcallHandle(lookup.find("nome_register_java_callbacks").orElseThrow(),
@@ -504,6 +508,16 @@ public final class NomeNativeBridge {
         if (!initialized) return;
         try {
             hStop.invokeExact();
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void setFavicon(String base64DataUri) {
+        if (!initialized || hSetFavicon == null || base64DataUri == null) return;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment strSeg = arena.allocateFrom(base64DataUri);
+            hSetFavicon.invokeExact(strSeg);
         } catch (Throwable t) {
             t.printStackTrace();
         }

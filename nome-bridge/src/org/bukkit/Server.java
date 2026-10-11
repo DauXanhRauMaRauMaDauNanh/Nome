@@ -58,4 +58,8 @@ public interface Server {
     io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler();
     io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler getGlobalRegionScheduler();
     io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler();
+
+    org.bukkit.util.CachedServerIcon getServerIcon();
+    org.bukkit.util.CachedServerIcon loadServerIcon(File file) throws Exception;
+    org.bukkit.util.CachedServerIcon loadServerIcon(java.awt.image.BufferedImage image) throws Exception;
 }

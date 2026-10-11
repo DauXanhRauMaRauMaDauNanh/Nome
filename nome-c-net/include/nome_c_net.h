@@ -132,6 +132,7 @@ NOME_API void nome_net_send_slot(NomeServerNetwork *net, uint64_t player_id, uin
 NOME_API void nome_net_send_raw(NomeServerNetwork *net, uint64_t player_id, int32_t packet_id, const uint8_t *payload, size_t len);
 NOME_API void nome_net_queue_chunk(NomeServerNetwork *net, uint64_t player_id, int cx, int cz);
 NOME_API NomeClientSession* nome_net_get_client(NomeServerNetwork *net, uint64_t player_id);
+NOME_API void nome_net_set_favicon(const char *favicon_data_uri);
 
 #ifdef __cplusplus
 }

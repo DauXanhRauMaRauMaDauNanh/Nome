@@ -656,7 +656,7 @@ static inline bool is_occluding_solid(uint16_t b) {
            b != BLOCK_RED_SHRUB && b != BLOCK_SHELF_MUSHROOM;
 }
 
-size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf) {
+size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf, bool modern) {
     if (!blocks || !out_buf || max_buf < 65536) return 0;
     
     size_t pos = 0;
@@ -665,9 +665,16 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
     write_be32(out_buf + pos, chunk_x); pos += 4;
     write_be32(out_buf + pos, chunk_z); pos += 4;
 
-    // 2. Heightmaps (NBT Compound: Empty compound 0x0A 0x00)
-    out_buf[pos++] = 0x0A;
-    out_buf[pos++] = 0x00;
+    // 2. Heightmaps
+    if (modern) {
+        // Minecraft 26.3 / 1.21.4+: Heightmaps is Map<Heightmap$Types, long[]>
+        // Write VarInt 0 (empty map)
+        pos += write_varint(out_buf + pos, 0);
+    } else {
+        // Minecraft <= 1.20.4: Empty NBT Compound (0x0A, 0x00)
+        out_buf[pos++] = 0x0A;
+        out_buf[pos++] = 0x00;
+    }
 
     // Temporary buffer to aggregate the 24 sections
     static uint8_t sec_buffer[65536];
@@ -787,9 +794,9 @@ size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* b
             }
         }
 
-        // Biomes PalettedContainer: single-valued Plains (39)
+        // Biomes PalettedContainer: single-valued Plains (41 for 26.3, 39 for 1.20.4)
         sec_buffer[sec_pos++] = 0; // bits_per_entry = 0
-        sec_pos += write_varint(sec_buffer + sec_pos, 39); // biome = plains
+        sec_pos += write_varint(sec_buffer + sec_pos, modern ? 41 : 39); // biome = plains
         sec_pos += write_varint(sec_buffer + sec_pos, 0); // data len = 0
     }
 

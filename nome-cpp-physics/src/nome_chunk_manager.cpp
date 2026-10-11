@@ -138,10 +138,10 @@ void ChunkManager::RemoveTicket(int cx, int cz) {
     }
 }
 
-size_t ChunkManager::SerializeChunk(int cx, int cz, uint8_t* out_buf, size_t max_buf) {
+size_t ChunkManager::SerializeChunk(int cx, int cz, uint8_t* out_buf, size_t max_buf, bool modern) {
     auto chunk = GetOrGenerateChunk(cx, cz);
     if (!chunk) return 0;
-    return nome_worldgen_serialize_chunk(cx, cz, chunk->blocks, out_buf, max_buf);
+    return nome_worldgen_serialize_chunk(cx, cz, chunk->blocks, out_buf, max_buf, modern);
 }
 
 std::vector<ChunkPos> ChunkManager::GenerateSpiralChunkList(int center_x, int center_z, int view_distance) {
@@ -303,8 +303,8 @@ void nome_chunk_get_all_blocks(int cx, int cz, uint16_t* out_blocks) {
     nome::ChunkManager::Instance().GetChunkAllBlocks(cx, cz, out_blocks);
 }
 
-size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf) {
-    return nome::ChunkManager::Instance().SerializeChunk(cx, cz, out_buf, max_buf);
+size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf, bool modern) {
+    return nome::ChunkManager::Instance().SerializeChunk(cx, cz, out_buf, max_buf, modern);
 }
 
 size_t nome_chunk_get_loaded_count() {

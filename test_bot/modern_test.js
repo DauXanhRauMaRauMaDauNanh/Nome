@@ -126,7 +126,29 @@ socket.on('data', (chunk) => {
             } else if (packetId === 0x49) {
                 console.log('    -> Verified 26.3 PlayerPositionPacket (0x49)!');
             } else if (packetId === 0x2E) {
-                console.log('    -> Verified 26.3 LevelChunkWithLightPacket (0x2E)! 3D Procedural Terrain Received!');
+                console.log('    -> Verified 26.3 LevelChunkWithLightPacket (0x2E)! Length: ' + payload.length);
+                let o = 0;
+                const cx = payload.readInt32BE(o); o += 4;
+                const cz = payload.readInt32BE(o); o += 4;
+                const hmCount = readVarInt(payload, o); o += hmCount.bytesRead;
+                const secLen = readVarInt(payload, o); o += secLen.bytesRead;
+                const secBytes = payload.slice(o, o + secLen.value); o += secLen.value;
+                const beCount = readVarInt(payload, o); o += beCount.bytesRead;
+                const skyMask = readVarInt(payload, o); o += skyMask.bytesRead;
+                const blockMask = readVarInt(payload, o); o += blockMask.bytesRead;
+                const emptySkyMask = readVarInt(payload, o); o += emptySkyMask.bytesRead;
+                const emptyBlockMask = readVarInt(payload, o); o += emptyBlockMask.bytesRead;
+                const skyUp = readVarInt(payload, o); o += skyUp.bytesRead;
+                const blockUp = readVarInt(payload, o); o += blockUp.bytesRead;
+                console.log(`       - Decoded: Chunk [${cx}, ${cz}], Heightmaps: ${hmCount.value}, SectionBytes: ${secBytes.length}, BlockEntities: ${beCount.value}`);
+                console.log(`       - LightData: SkyMask=${skyMask.value}, BlockMask=${blockMask.value}, SkyUpdates=${skyUp.value}, BlockUpdates=${blockUp.value}`);
+                console.log(`       - Trailing unread bytes: ${payload.length - o} (Must be 0)`);
+                if (payload.length - o === 0 && hmCount.value === 0) {
+                    console.log('    -> 26.3 CHUNK PACKET FIELD SPECIFICATION: 100% PERFECT MATCH!');
+                } else {
+                    console.error('[-] CHUNK PACKET MISMATCH: Trailing unread: ' + (payload.length - o));
+                    process.exit(1);
+                }
                 console.log('===============================================================');
                 console.log('  MINECRAFT 26.3 (PROTOCOL 777) CONNECTION VERIFIED 100%!     ');
                 console.log('===============================================================');

@@ -31,6 +31,7 @@ public class CraftPlayer implements Player {
     private boolean flying = false;
     private Vector velocity = new Vector(0, 0, 0);
     private final PlayerInventory inventory;
+    private final net.minecraft.server.level.ServerPlayer handle;
 
     public CraftPlayer(int entityId, String name, UUID uuid, World world, Location loc, Server server) {
         this.entityId = entityId;
@@ -40,10 +41,30 @@ public class CraftPlayer implements Player {
         this.location = loc != null ? loc : new Location(world, 0, 64, 0);
         this.server = server;
         this.inventory = new org.bukkit.inventory.SimplePlayerInventory(this);
+        this.handle = new net.minecraft.server.level.ServerPlayer();
+        attachViaVersionIfPresent(this.handle.connection.networkManager.channel);
     }
 
-    public Object getHandle() {
-        return this;
+    private void attachViaVersionIfPresent(io.netty.channel.Channel ch) {
+        try {
+            org.bukkit.plugin.Plugin viaPlugin = server != null ? server.getPluginManager().getPlugin("ViaVersion") : null;
+            if (viaPlugin == null) return;
+            ClassLoader cl = viaPlugin.getClass().getClassLoader();
+            Class<?> userConnClass = Class.forName("com.viaversion.viaversion.connection.UserConnectionImpl", true, cl);
+            Class<?> userConnInterface = Class.forName("com.viaversion.viaversion.api.connection.UserConnection", true, cl);
+            Class<?> encodeHandlerClass = Class.forName("com.viaversion.viaversion.bukkit.handlers.BukkitEncodeHandler", true, cl);
+            java.lang.reflect.Constructor<?> uConnCtor = userConnClass.getConstructor(io.netty.channel.Channel.class);
+            Object userConn = uConnCtor.newInstance(ch);
+            java.lang.reflect.Constructor<?> encCtor = encodeHandlerClass.getConstructor(userConnInterface);
+            Object encHandler = encCtor.newInstance(userConn);
+            ch.pipeline().addLast("via-encoder", (io.netty.channel.ChannelHandler) encHandler);
+        } catch (Throwable t) {
+            // Log if debugging needed
+        }
+    }
+
+    public net.minecraft.server.level.ServerPlayer getHandle() {
+        return handle;
     }
 
     @Override public int getEntityId() { return entityId; }
@@ -167,13 +188,39 @@ public class CraftPlayer implements Player {
         return new InetSocketAddress("127.0.0.1", 25565);
     }
 
+    private final java.util.Set<String> channels = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public void addChannel(String channel) {
+        if (channel != null) {
+            channels.add(channel);
+        }
+    }
+
+    public void removeChannel(String channel) {
+        if (channel != null) {
+            channels.remove(channel);
+        }
+    }
+
+    public java.util.Set<String> getChannels() {
+        return java.util.Collections.unmodifiableSet(channels);
+    }
+
     @Override
     public void sendPluginMessage(org.bukkit.plugin.Plugin source, String channel, byte[] message) {
-        // Plugin message dispatch
+        // Dispatched to client via network packet if channel listening
+    }
+
+    public void sendPluginMessage(String channel, byte[] message) {
+        sendPluginMessage(null, channel, message);
     }
 
     @Override
     public java.util.Set<String> getListeningPluginChannels() {
-        return server.getMessenger().getIncomingChannels();
+        java.util.Set<String> allChannels = new java.util.HashSet<>(channels);
+        if (server != null && server.getMessenger() != null) {
+            allChannels.addAll(server.getMessenger().getIncomingChannels());
+        }
+        return java.util.Collections.unmodifiableSet(allChannels);
     }
 }

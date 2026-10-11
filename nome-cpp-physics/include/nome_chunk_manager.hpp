@@ -118,7 +118,7 @@ public:
     void AddTicket(int cx, int cz);
     void RemoveTicket(int cx, int cz);
 
-    size_t SerializeChunk(int cx, int cz, uint8_t* out_buf, size_t max_buf);
+    size_t SerializeChunk(int cx, int cz, uint8_t* out_buf, size_t max_buf, bool modern = true);
 
     // Smart Spiral Chunk Loading Order Generator
     std::vector<ChunkPos> GenerateSpiralChunkList(int center_x, int center_z, int view_distance);
@@ -159,7 +159,7 @@ NOME_CHUNK_API void nome_chunk_set_block(int x, int y, int z, uint16_t block);
 NOME_CHUNK_API void nome_chunk_get_heightmap(int cx, int cz, int16_t* out_heightmap);
 NOME_CHUNK_API void nome_chunk_get_section(int cx, int cz, int section_y, uint16_t* out_blocks);
 NOME_CHUNK_API void nome_chunk_get_all_blocks(int cx, int cz, uint16_t* out_blocks);
-NOME_CHUNK_API size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf);
+NOME_CHUNK_API size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf, bool modern);
 NOME_CHUNK_API size_t nome_chunk_get_loaded_count();
 NOME_CHUNK_API size_t nome_chunk_gc(int max_idle_seconds);
 NOME_CHUNK_API bool nome_chunk_save(int cx, int cz);

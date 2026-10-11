@@ -67,10 +67,21 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "All Java library shims are 100% built-in native (Zero external JAR dependencies)!" -ForegroundColor Green
 Remove-Item -Force target/classes/module-info.class -ErrorAction SilentlyContinue
 
+# Bundle default server-icon.png into Nome.jar
+if (Test-Path "./server-icon.png") {
+    Copy-Item "./server-icon.png" "./target/classes/server-icon.png" -Force
+}
+
 # Package standalone Fat JAR with bundled native DLLs!
 & "C:\Program Files\Java\jdk-25.0.4\bin\jar.exe" --create --file Nome.jar --main-class io.nome.bootstrap.Main -C target/classes .
 if (Test-Path "C:\Users\thait\Downloads\prod") {
     Copy-Item Nome.jar "C:\Users\thait\Downloads\prod\Nome.jar" -Force
+    if (Test-Path "./server-icon.png") {
+        Copy-Item "./server-icon.png" "C:\Users\thait\Downloads\prod\server-icon.png" -Force
+    }
+    if (Test-Path "./logo.png") {
+        Copy-Item "./logo.png" "C:\Users\thait\Downloads\prod\logo.png" -Force
+    }
     if (-not (Test-Path "C:\Users\thait\Downloads\prod\bin\native")) {
         New-Item -ItemType Directory -Path "C:\Users\thait\Downloads\prod\bin\native" -Force | Out-Null
     }

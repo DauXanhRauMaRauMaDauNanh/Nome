@@ -1,6 +1,13 @@
 package io.nome.bridge;
 
 import java.io.File;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import org.bukkit.util.CachedServerIcon;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
@@ -33,7 +40,7 @@ public class NomeServer implements Server {
 
     private final String name = "Nome";
     private final String version = "26.3-NATIVE (Protocol 777)";
-    private final String bukkitVersion = "1.21.4-R0.1-SNAPSHOT";
+    private final String bukkitVersion = "26.3-R0.1-SNAPSHOT";
     private final Logger logger = Logger.getLogger("Minecraft");
     private final SimplePluginManager pluginManager;
     private final SimpleServicesManager servicesManager;
@@ -117,6 +124,7 @@ public class NomeServer implements Server {
         NomeNativeBridge.init();
         NomeNativeBridge.start();
         isRunning = true;
+        loadOrInitServerIcon();
 
         long loadedChunks = NomeNativeBridge.getLoadedChunkCount();
         if (loadedChunks == 0) loadedChunks = 49;
@@ -260,7 +268,8 @@ public class NomeServer implements Server {
     }
 
     @Override public void reload() {
-        MinecraftConsole.info("[Nome] Reloading server plugins...");
+        MinecraftConsole.info("[Nome] Reloading server plugins & icon...");
+        loadOrInitServerIcon();
         pluginManager.clearPlugins();
         pluginManager.loadPlugins();
     }
@@ -335,5 +344,66 @@ public class NomeServer implements Server {
     @Override
     public io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler() {
         return foliaScheduler;
+    }
+
+    private CachedServerIcon serverIcon;
+
+    public void loadOrInitServerIcon() {
+        try {
+            File iconFile = new File("server-icon.png");
+            if (!iconFile.exists()) {
+                // If server-icon.png does not exist in working directory, try extracting from bundled resources
+                try (InputStream in = getClass().getResourceAsStream("/server-icon.png")) {
+                    if (in != null) {
+                        Files.copy(in, iconFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                        MinecraftConsole.info("[Nome] Generated default server-icon.png from bundle");
+                    } else {
+                        File fallback = new File("assets/server-icon.png");
+                        if (!fallback.exists()) {
+                            fallback = new File("bin/server-icon.png");
+                        }
+                        if (fallback.exists()) {
+                            Files.copy(fallback.toPath(), iconFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                            MinecraftConsole.info("[Nome] Generated default server-icon.png from assets");
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (iconFile.exists()) {
+                byte[] bytes = Files.readAllBytes(iconFile.toPath());
+                String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
+                this.serverIcon = () -> dataUri;
+                NomeNativeBridge.setFavicon(dataUri);
+                MinecraftConsole.info("[Nome] Loaded server icon from server-icon.png (" + bytes.length + " bytes)");
+            }
+        } catch (Throwable t) {
+            MinecraftConsole.warn("[Nome] Failed to load server-icon.png: " + t.getMessage());
+        }
+    }
+
+    @Override
+    public CachedServerIcon getServerIcon() {
+        return serverIcon;
+    }
+
+    @Override
+    public CachedServerIcon loadServerIcon(File file) throws Exception {
+        if (!file.exists()) throw new IllegalArgumentException("File does not exist: " + file);
+        byte[] bytes = Files.readAllBytes(file.toPath());
+        String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
+        return () -> dataUri;
+    }
+
+    @Override
+    public CachedServerIcon loadServerIcon(BufferedImage image) throws Exception {
+        if (image == null) throw new IllegalArgumentException("image cannot be null");
+        if (image.getWidth() != 64 || image.getHeight() != 64) {
+            throw new UnsupportedOperationException("Server icon must be exactly 64x64 pixels!");
+        }
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(image, "PNG", baos);
+        String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(baos.toByteArray());
+        return () -> dataUri;
     }
 }

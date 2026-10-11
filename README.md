@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/DauXanhRauMaRauMaDauNanh/Nome/main/logo.png" alt="Nome Logo" width="160" height="160" onerror="this.style.display='none'"/>
+  <img src="./logo.png" alt="Nome Server Logo" width="180" height="180" style="border-radius: 20px; box-shadow: 0 8px 24px rgba(0, 230, 255, 0.25);" onerror="this.src='https://raw.githubusercontent.com/DauXanhRauMaRauMaDauNanh/Nome/main/logo.png'"/>
 </p>
 
 <h1 align="center">🍃 Nome Server</h1>
@@ -218,12 +218,35 @@ c:\Users\thait\Downloads\Nome\
 │   └── ExamplePlugin.jar                   # Sample plugin validating Vault & Events
 ├── test_plugin/                            # Source code of ExamplePlugin
 ├── test_bot/                               # Automated Mineflayer survival bot tests
+├── logo.png                                # High-resolution brand logo (Flying Star)
+├── server-icon.png                         # Default 64x64 server favicon (User-customizable)
 ├── Nome.jar                                # Standalone Fat JAR with bundled native DLLs (10.6MB)
 ├── build.ps1                               # 1-click build script (Rust + C++ + Java -> Nome.jar)
 ├── run.ps1                                 # PowerShell launcher with optional -TestBot mode
 ├── run.bat                                 # Windows CMD launcher
 └── server.properties                       # Server configuration file
 ```
+
+---
+
+## 🎨 Customizable Server Icon & Branding
+
+Nome features a minimalist, high-tech flying star visual identity and includes native off-heap support for customizable server icons:
+
+<p align="center">
+  <img src="./logo.png" alt="Nome Logo" width="130" height="130" style="border-radius: 16px; vertical-align: middle; margin-right: 25px;" />
+  <img src="./server-icon.png" alt="Nome 64x64 Server Favicon" width="64" height="64" style="image-rendering: pixelated; border: 2px solid #00f0ff; border-radius: 8px; vertical-align: middle;" />
+</p>
+
+* **Default Out-of-the-Box Favicon**: Nome automatically extracts the default **64x64 PNG** (`server-icon.png`) on first boot if one is not present.
+* **100% User Customizable**:
+  1. Simply place your own `server-icon.png` (must be exactly **64×64 pixels**) into the root directory of your server.
+  2. The server will automatically load and encode it into the Server List Ping packet (`status/0x00`).
+* **Instant Hot-Reload**: Type `reload` or `icon` in the server console to update the icon live without restarting the server!
+* **Bukkit API Compatible**:
+  * `Bukkit.getServer().getServerIcon()`
+  * `Bukkit.getServer().loadServerIcon(File file)`
+  * `Bukkit.getServer().loadServerIcon(BufferedImage image)`
 
 ---
 

@@ -21,8 +21,8 @@
 extern "C" {
 #endif
 void nome_worldgen_generate_chunk(int chunk_x, int chunk_z, uint16_t* out_blocks, int64_t seed);
-size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf);
-size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf);
+size_t nome_worldgen_serialize_chunk(int chunk_x, int chunk_z, const uint16_t* blocks, uint8_t* out_buf, size_t max_buf, bool modern);
+size_t nome_chunk_serialize(int cx, int cz, uint8_t* out_buf, size_t max_buf, bool modern);
 void nome_chunk_init(int64_t seed);
 uint16_t nome_chunk_get_block(int x, int y, int z);
 void nome_chunk_set_block(int x, int y, int z, uint16_t block);
@@ -55,6 +55,17 @@ struct NomeServerNetwork {
     uint16_t spawn_chunk[16 * 16 * 384];
     uint64_t tick_clock;
 };
+
+static char g_server_favicon[65536] = {0};
+
+void nome_net_set_favicon(const char *favicon_data_uri) {
+    if (!favicon_data_uri || favicon_data_uri[0] == '\0') {
+        g_server_favicon[0] = '\0';
+        return;
+    }
+    strncpy(g_server_favicon, favicon_data_uri, sizeof(g_server_favicon) - 1);
+    g_server_favicon[sizeof(g_server_favicon) - 1] = '\0';
+}
 
 static void set_nonblocking(int fd) {
 #ifdef _WIN32
@@ -266,8 +277,8 @@ static void send_raw_packet(int fd, int32_t packet_id, const uint8_t *payload, s
     int len_len = nome_varint_encode(total_len, len_buf);
 
     size_t full_size = (size_t)(len_len + id_len + payload_len);
-    if (full_size <= 65536) {
-        uint8_t stack_buf[65536];
+    if (full_size <= 4096) {
+        uint8_t stack_buf[4096];
         memcpy(stack_buf, len_buf, len_len);
         memcpy(stack_buf + len_len, id_buf, id_len);
         if (payload && payload_len > 0) {
@@ -463,7 +474,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
 
     // Immediately send center chunk (0, 0): 0x2E for 26.3, 0x25 for 1.20.4
     static uint8_t chunk_payload[65536];
-    size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload));
+    size_t chunk_len = nome_chunk_serialize(0, 0, chunk_payload, sizeof(chunk_payload), modern);
     if (chunk_len > 0) {
         int chunk_pkt_id = modern ? 0x2E : 0x25;
         send_raw_packet(fd, chunk_pkt_id, chunk_payload, chunk_len);
@@ -472,6 +483,7 @@ static void send_full_play_sequence(NomeServerNetwork *net, NomeClientSession *c
 }
 
 static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) {
+    if (net) g_active_net = net;
     while (c->rx_len > 0) {
         int32_t packet_len = 0;
         int len_bytes = nome_varint_decode(c->rx_buf, c->rx_len, &packet_len);
@@ -504,15 +516,26 @@ static void handle_client_packets(NomeServerNetwork *net, NomeClientSession *c) 
         } else if (c->state == NOME_STATE_STATUS) {
             if (packet_id == 0x00) {
                 // Status Request
-                const char *status_json =
-                    "{\"version\":{\"name\":\"Nome 26.3 (Native C/C++/Rust)\",\"protocol\":777},"
-                    "\"players\":{\"max\":100,\"online\":1,\"sample\":[]},"
-                    "\"description\":{\"text\":\"\\u00a7b\\u00a7lNome \\u00a78- \\u00a7a100% Native C/C++/Rust Engine\\n\\u00a7eWorldGen \\u2022 Crafting \\u2022 Zero-GC\"}}";
+                size_t json_cap = 65536 + 1024;
+                char *status_json = (char*)malloc(json_cap);
+                if (status_json) {
+                    static const char *base_status =
+                        "{\"version\":{\"name\":\"Nome 26.3 (Native C/C++/Rust)\",\"protocol\":777},"
+                        "\"players\":{\"max\":100,\"online\":1,\"sample\":[]},"
+                        "\"description\":{\"text\":\"\\u00a7b\\u00a7lNome \\u00a78- \\u00a7a100% Native C/C++/Rust Engine\\n\\u00a7eWorldGen \\u2022 Crafting \\u2022 Zero-GC\"}";
+                    if (g_server_favicon[0] != '\0') {
+                        snprintf(status_json, json_cap, "%s,\"favicon\":\"%s\"}", base_status, g_server_favicon);
+                    } else {
+                        snprintf(status_json, json_cap, "%s}", base_status);
+                    }
 
-                NomePacketBuffer *pbuf = nome_buffer_create(1024);
-                nome_buffer_write_string(pbuf, status_json);
-                send_raw_packet(c->socket_fd, 0x00, pbuf->data, pbuf->write_pos);
-                nome_buffer_free(pbuf);
+                    size_t json_len = strlen(status_json);
+                    NomePacketBuffer *pbuf = nome_buffer_create(json_len + 16);
+                    nome_buffer_write_string(pbuf, status_json);
+                    send_raw_packet(c->socket_fd, 0x00, pbuf->data, pbuf->write_pos);
+                    nome_buffer_free(pbuf);
+                    free(status_json);
+                }
             } else if (packet_id == 0x01) {
                 // Ping Request -> Pong Response
                 send_raw_packet(c->socket_fd, 0x01, payload, payload_len);
@@ -959,7 +982,7 @@ size_t nome_net_poll_events(NomeServerNetwork *net, int timeout_ms) {
                 int cx = c->pending_chunk_x[c->pending_chunk_head];
                 int cz = c->pending_chunk_z[c->pending_chunk_head];
                 c->pending_chunk_head++;
-                size_t chunk_len = nome_chunk_serialize(cx, cz, chunk_payload, sizeof(chunk_payload));
+                size_t chunk_len = nome_chunk_serialize(cx, cz, chunk_payload, sizeof(chunk_payload), modern);
                 if (chunk_len > 0) {
                     send_raw_packet(c->socket_fd, chunk_pkt_id, chunk_payload, chunk_len);
                     sent_this_poll++;

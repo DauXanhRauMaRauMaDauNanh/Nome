@@ -7,7 +7,7 @@ import org.bukkit.plugin.PluginDescriptionFile;
 public class NomeUnsafeValues implements UnsafeValues {
     @Override
     public int getProtocolVersion() {
-        return 769; // Protocol 769 (1.21.4) for high compatibility with standard plugins like ViaVersion
+        return 777; // Protocol 777 (Minecraft 26.3 Native)
     }
 
     @Override
